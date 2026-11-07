@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -378,13 +378,36 @@ def close_as_paid(session: Session, invoice: Invoice, on: date) -> None:
 
 
 def cancel(session: Session, invoice: Invoice, paypal, reason: str) -> None:
-    """Issued invoices are never deleted. Cancelling reverses the ledger and keeps the record."""
+    """Issued invoices are never deleted. A legal credit note (Stornorechnung) corrects them.
+
+    Simply removing an invoice is not allowed in Germany, and VAT shown on it could still be owed.
+    """
     if invoice.status not in OPEN_STATES:
         raise InvoiceError("Only open invoices can be cancelled.")
     if invoice.paid_cents:
         raise InvoiceError("This invoice has payments. Refund them first.")
-    business = business_of(session)
-    on = today(session)
+    with _issue_lock:
+        session.refresh(invoice)
+        business = business_of(session)
+        session.refresh(business)
+        on = today(session)
+        number = f"{business.invoice_prefix}-{on.year}-{business.next_number:04d}"
+        facts = replace(facts_for(invoice, business), issue_date=on)
+        notes = [f"Stornorechnung zu Rechnung {invoice.number} vom {invoice.issue_date:%d.%m.%Y}."]
+        try:
+            credit = einvoice.create(facts, number, tuple(line.unit for line in invoice.lines), notes, None,
+                                     corrects=(invoice.number, invoice.issue_date))
+        except einvoice.EInvoiceInvalid as error:
+            raise InvoiceError(f"The credit note failed the official rules: {error}") from error
+        invoice.credit_note_number = number
+        invoice.credit_note_xml = credit.xml
+        invoice.credit_note_pdf = credit.pdf
+        business.next_number += 1
+        _cancel_records(session, invoice, business, paypal, on, reason)
+        session.commit()
+
+
+def _cancel_records(session: Session, invoice: Invoice, business: Business, paypal, on: date, reason: str) -> None:
     ids = [invoice.paypal_id] + [i.paypal_id for p in invoice.plans for i in p.installments if i.paypal_id]
     for paypal_id in ids:
         if paypal_id:
@@ -400,7 +423,7 @@ def cancel(session: Session, invoice: Invoice, paypal, reason: str) -> None:
     for proposal in invoice.proposals:
         if proposal.status == "pending":
             proposal.status = "obsolete"
-    audit.record(session, "owner", "cancelled", invoice.id, reason=reason[:200])
+    audit.record(session, "owner", "cancelled", invoice.id, reason=reason[:200], credit_note=invoice.credit_note_number)
 
 
 def resume_after_dispute(session: Session, invoice: Invoice) -> None:

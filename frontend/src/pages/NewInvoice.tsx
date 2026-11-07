@@ -9,7 +9,9 @@ const EMPTY_CUSTOMER: CustomerForm = { id: null, name: "", street: "", postcode:
 const EXAMPLE = "4 hours bathroom repair at Bäckerei Muster GmbH at 65 euro, 120 euro material, on 05.11.2026";
 
 function toNumber(text: string): number {
-  return Number(String(text).replace(",", ".")) || 0;
+  const value = String(text).trim();
+  const normal = value.includes(",") ? value.replace(/\./g, "").replace(",", ".") : value;
+  return Number(normal) || 0;
 }
 
 export function NewInvoice({ refresh }: { refresh: () => void }) {
@@ -215,7 +217,7 @@ export function NewInvoice({ refresh }: { refresh: () => void }) {
           <button className="link" disabled={reading} onClick={() => setNote(EXAMPLE)}>
             Use an example
           </button>
-          {reading && <span className="muted small">The AI runs on this laptop, so this can take up to a minute.</span>}
+          {reading && <span className="muted small">Clear notes are instant. For messy ones the AI runs on this laptop, which can take a minute or two.</span>}
         </div>
       </section>
 
@@ -227,6 +229,11 @@ export function NewInvoice({ refresh }: { refresh: () => void }) {
             <h2>2. Check the details</h2>
             <span className="chip">{capture.source === "ai" ? "Read by local AI" : "Read by fixed rules"}</span>
           </div>
+          {capture.warnings?.map((text: string) => (
+            <div className="alert warn" key={text}>
+              ! {text}
+            </div>
+          ))}
           {unsure.length > 0 && <p className="note-unsure">! Fields in yellow were missing or not found in your note. Please check them.</p>}
 
           <h3>Customer</h3>

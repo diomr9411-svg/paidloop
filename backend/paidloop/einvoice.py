@@ -71,11 +71,12 @@ def build_xml(
     units: tuple[str, ...],
     notes: list[str],
     pay_link: str | None,
+    corrects: tuple[str, date] | None = None,
 ) -> bytes:
     doc = Document()
     doc.context.guideline_parameter.id = "urn:cen.eu:en16931:2017"
     doc.header.id = number
-    doc.header.type_code = "380"
+    doc.header.type_code = "381" if corrects else "380"
     doc.header.issue_date_time = facts.issue_date
     for text in notes:
         note = IncludedNote()
@@ -108,18 +109,22 @@ def build_xml(
 
     settlement = doc.trade.settlement
     settlement.currency_code = "EUR"
-    means = PaymentMeans()
-    means.type_code = "68"  # online payment service
-    means.information.add("PayPal")
-    settlement.payment_means.add(means)
+    if corrects:
+        settlement.invoice_referenced_document.issuer_assigned_id = corrects[0]
+        settlement.invoice_referenced_document.issue_date_time = corrects[1]
+    else:
+        means = PaymentMeans()
+        means.type_code = "68"  # online payment service
+        means.information.add("PayPal")
+        settlement.payment_means.add(means)
 
-    terms = PaymentTerms()
-    text = f"Zahlbar bis {facts.due_date:%d.%m.%Y}."
-    if pay_link:
-        text += f" Online bezahlen: {pay_link}"
-    terms.description = text
-    terms.due = facts.due_date
-    settlement.terms.add(terms)
+        terms = PaymentTerms()
+        text = f"Zahlbar bis {facts.due_date:%d.%m.%Y}."
+        if pay_link:
+            text += f" Online bezahlen: {pay_link}"
+        terms.description = text
+        terms.due = facts.due_date
+        settlement.terms.add(terms)
 
     category = "E" if facts.seller_small_business else "S"
     for position, (line, unit) in enumerate(zip(facts.lines, units), start=1):
@@ -225,12 +230,14 @@ def build_pdf(
     notes: list[str],
     pay_link: str | None,
     qr_png: bytes | None,
+    corrects: tuple[str, date] | None = None,
 ) -> bytes:
     """The readable part of the invoice. It is in German, because that is what the customer needs."""
     _register_fonts()
+    title = "Stornorechnung" if corrects else "Rechnung"
     buffer = BytesIO()
     page = canvas.Canvas(buffer, pagesize=A4, invariant=1)
-    page.setTitle(f"Rechnung {number}")
+    page.setTitle(f"{title} {number}")
     page.setAuthor(facts.seller.name)
     page.setSubject("Rechnung")
     left, right = 55, 540
@@ -254,11 +261,14 @@ def build_pdf(
 
     y -= 16
     page.setFont("VeraBd", 16)
-    page.drawString(left, y, f"Rechnung {number}")
+    page.drawString(left, y, f"{title} {number}")
     y -= 20
     page.setFont("Vera", 9)
     service = f"Leistungsdatum: {facts.service_date:%d.%m.%Y}   " if facts.service_date else ""
-    page.drawString(left, y, f"Rechnungsdatum: {facts.issue_date:%d.%m.%Y}   {service}Zahlbar bis: {facts.due_date:%d.%m.%Y}")
+    if corrects:
+        page.drawString(left, y, f"Datum: {facts.issue_date:%d.%m.%Y}   {service}Storniert Rechnung {corrects[0]} vom {corrects[1]:%d.%m.%Y}")
+    else:
+        page.drawString(left, y, f"Rechnungsdatum: {facts.issue_date:%d.%m.%Y}   {service}Zahlbar bis: {facts.due_date:%d.%m.%Y}")
 
     y -= 28
     page.setFont("VeraBd", 9)
@@ -352,16 +362,17 @@ def create(
     notes: list[str],
     pay_link: str | None,
     qr_png: bytes | None = None,
+    corrects: tuple[str, date] | None = None,
 ) -> EInvoice:
     """Build and validate. Raises EInvoiceInvalid rather than ever returning a broken invoice."""
     try:
-        xml = build_xml(facts, number, units, notes, pay_link)
+        xml = build_xml(facts, number, units, notes, pay_link, corrects)
     except Exception as error:  # the library reports schema problems with several error types
         raise EInvoiceInvalid([f"Schema: {error}"]) from error
     problems, checked = validate_rules(xml)
     if problems:
         raise EInvoiceInvalid(problems)
-    visual = _add_output_intent(build_pdf(facts, number, notes, pay_link, qr_png))
+    visual = _add_output_intent(build_pdf(facts, number, notes, pay_link, qr_png, corrects))
     return EInvoice(xml=xml, pdf=attach_xml(visual, xml, level="EN 16931"), rules_checked=checked)
 
 

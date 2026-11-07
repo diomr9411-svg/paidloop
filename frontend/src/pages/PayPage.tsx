@@ -19,10 +19,11 @@ const TEXT = {
     offer: "Unser Angebot",
     accept: "Plan annehmen",
     help: "Können wir helfen?",
+    welcome: "Guten Tag! Wenn Sie gerade nicht alles bezahlen können oder etwas an der Rechnung nicht stimmt, schreiben Sie es mir einfach.",
     placeholder: "Schreiben Sie hier...",
     send: "Senden",
     thinking: "Einen Moment bitte...",
-    hold: "Die Erinnerungen sind angehalten, bis der Inhaber Ihr Anliegen geprüft hat.",
+    hold: "Die Erinnerungen sind angehalten, bis Ihr Anliegen geprüft wurde.",
     invalid: "Dieser Link ist nicht gültig.",
     note: "Testumgebung. Es wird kein echtes Geld bewegt.",
   },
@@ -42,6 +43,7 @@ const TEXT = {
     offer: "Our offer",
     accept: "Accept plan",
     help: "Can we help?",
+    welcome: "Hello! If you can't pay it all right now, or something about the invoice is wrong, just tell me.",
     placeholder: "Write here...",
     send: "Send",
     thinking: "One moment please...",
@@ -59,6 +61,7 @@ export function PayPage({ token }: { token: string }) {
   const [sending, setSending] = useState(false);
   const [pending, setPending] = useState("");
   const chatEnd = useRef<HTMLDivElement>(null);
+  const [chosenLanguage, setChosenLanguage] = useState<"de" | "en" | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -83,7 +86,7 @@ export function PayPage({ token }: { token: string }) {
   if (notFound) return <div className="paypage"><div className="card">{TEXT.en.invalid}</div></div>;
   if (!page) return <div className="paypage"><p className="muted">...</p></div>;
 
-  const language: "de" | "en" = page.language === "en" ? "en" : "de";
+  const language: "de" | "en" = chosenLanguage || (page.language === "en" ? "en" : "de");
   const t = TEXT[language];
   const money = (cents: number) => eurFor(cents, language);
   const closed = page.status === "paid" || page.status === "cancelled";
@@ -98,6 +101,7 @@ export function PayPage({ token }: { token: string }) {
     try {
       const answer = await post(`/api/pay/${token}/chat`, { text });
       setPage(answer.page);
+      setChosenLanguage(null); // follow the language the customer just wrote in
     } catch (e) {
       setError((e as Error).message);
       setDraft(text);
@@ -135,8 +139,17 @@ export function PayPage({ token }: { token: string }) {
   return (
     <div className="paypage">
       <section className="card pay-head">
-        <div className="muted">
-          {t.invoiceFrom} {page.seller}
+        <div className="pay-top">
+          <div className="muted">
+            {t.invoiceFrom} {page.seller}
+          </div>
+          <div className="lang-switch" role="group" aria-label="Language">
+            {(["de", "en"] as const).map((code) => (
+              <button key={code} className={`small ${language === code ? "selected" : ""}`} onClick={() => setChosenLanguage(code)}>
+                {code.toUpperCase()}
+              </button>
+            ))}
+          </div>
         </div>
         <h1>{page.number}</h1>
 
@@ -219,7 +232,7 @@ export function PayPage({ token }: { token: string }) {
         <section className="card">
           <h2>{t.help}</h2>
           <div className="chat">
-            <div className="bubble agent">{page.welcome}</div>
+            <div className="bubble agent">{t.welcome}</div>
             {page.messages.map((message: any, index: number) => (
               <div key={index} className={`bubble ${message.role}`}>
                 {message.text}

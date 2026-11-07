@@ -6,6 +6,7 @@ The AI proposes. The policy gate checks. Code acts. Serious steps wait for the o
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Literal
@@ -20,6 +21,7 @@ from paidloop.compliance import CONSUMER_NOTICE_DE
 from paidloop.models import DISPUTED, ISSUED, ON_PLAN, Business, Invoice, Proposal
 from paidloop.paypal import PayPalError
 
+AI_TIMEOUT_SECONDS = 90
 LEVEL_AFTER = {policy.FRIENDLY: 1, policy.FIRM: 2, policy.FINAL: 3, policy.OWNER_REVIEW: 4}
 
 
@@ -33,9 +35,10 @@ SYSTEM_PROMPT = """You help a small German business decide the next step for an 
 You get facts as JSON and a list allowed_actions. Choose exactly one action from allowed_actions.
 Most small delays resolve within a week, so waiting is good for reliable customers who are only a little late.
 Do not choose a harsher step just because it is allowed if waiting a little is kinder and low risk, but do not
-wait when the risk is high. reason is one short plain English sentence for the owner that uses the facts.
-friendly_sentence is one warm opening sentence in the customer's language, with no numbers, dates, promises,
-discounts, threats or legal words. Leave it empty if unsure."""
+wait when the risk is high. reason is one short plain English sentence for the owner that uses the facts. Always write it.
+friendly_sentence is one warm opening sentence in customer_language ("de" is German, "en" is English), with no numbers,
+dates, promises, discounts, threats or legal words. Leave it empty if unsure.
+Example answer: {"action":"friendly_reminder","reason":"Six days late and this customer often pays late, so a kind reminder is due.","friendly_sentence":"Ich hoffe, es geht Ihnen gut."}"""
 
 
 def limits_of(business: Business) -> policy.Limits:
@@ -118,8 +121,8 @@ def _message(invoice: Invoice, business: Business, action: str, on: date, public
         due,
         f"{public_base}/#/pay/{invoice.public_token}",
         business.name,
-        late_costs_of(invoice, on) if action == policy.FINAL else None,
-        messages.safe_ai_sentence(ai_sentence),
+        late_costs_of(invoice, on) if action == policy.FINAL and not invoice.active_plan else None,
+        messages.safe_ai_sentence(ai_sentence, invoice.customer.language),
     )
 
 
@@ -149,14 +152,20 @@ def _choose(invoice: Invoice, facts: policy.FollowupFacts, limits: policy.Limits
         "risk_reasons": list(assessed.reasons),
         "allowed_actions": options,
     }
-    answer = ai.ask_json(SYSTEM_PROMPT, json.dumps(data, ensure_ascii=False), AgentChoice)
+    answer = ai.ask_json(SYSTEM_PROMPT, json.dumps(data, ensure_ascii=False), AgentChoice, timeout=AI_TIMEOUT_SECONDS)
     if answer is None:
         return rule_action, rule_reason, "rules", ""
     verdict = policy.gate(answer.action, facts, limits)
+    if verdict.allowed and answer.action == policy.WAIT and rule_action != policy.WAIT and assessed.level != "low":
+        # Waiting forever is also a risk: only a reliable customer can be given extra time by the AI.
+        verdict = policy.GateResult(False, False, "The AI wanted to wait, but this customer's risk is not low.")
     if not verdict.allowed:
         audit.record(session, "rules", "ai_choice_refused", invoice.id, proposed=answer.action, why=verdict.reason)
-        return rule_action, f"The AI's choice was refused, so the rules decided. {rule_reason}", "rules", ""
-    reason = " ".join(answer.reason.split())[:300] or rule_reason
+        return rule_action, f"The AI's choice was refused, so the rules decided. {rule_reason}", "rules", answer.friendly_sentence
+    reason = " ".join(answer.reason.split())[:300]
+    if not reason or messages.looks_german(reason) or not messages.LATIN_ONLY.match(re.sub(r"[0-9%€]", "", reason)):
+        # A step with no usable reason can't be explained to the owner, so the rules decide instead.
+        return rule_action, rule_reason, "rules", answer.friendly_sentence
     return answer.action, reason, "ai", answer.friendly_sentence
 
 
@@ -171,6 +180,7 @@ def run(session: Session, paypal, ai: AI, public_base: str) -> list[Outcome]:
             invoices.sync(session, invoice, paypal)
         except PayPalError:
             pass  # a stale view is safe here: a later run picks up the payment, and reminders are spaced out
+        session.commit()  # the AI can take a minute, and other screens must keep working meanwhile
         if invoice.status not in {ISSUED, ON_PLAN, DISPUTED}:
             outcomes.append(Outcome(invoice.id, invoice.number, policy.WAIT, "The invoice has just been paid.", "rules", "nothing"))
             continue
@@ -194,6 +204,7 @@ def run(session: Session, paypal, ai: AI, public_base: str) -> list[Outcome]:
                          payload=json.dumps({"english": text.english_for_owner}, ensure_ascii=False))
             )
             audit.record(session, decided_by, "proposed", invoice.id, action=action, reason=reason)
+            session.commit()
             outcomes.append(Outcome(invoice.id, invoice.number, action, reason, decided_by, "waiting_for_owner"))
             continue
 
@@ -201,10 +212,11 @@ def run(session: Session, paypal, ai: AI, public_base: str) -> list[Outcome]:
             _send(session, invoice, paypal, action, text.subject, text.body, on, decided_by, reason)
         except PayPalError as error:
             audit.record(session, "paypal", "reminder_failed", invoice.id, action=action, error=str(error)[:200])
+            session.commit()
             outcomes.append(Outcome(invoice.id, invoice.number, action, f"PayPal did not accept it: {error}", decided_by, "failed"))
             continue
+        session.commit()
         outcomes.append(Outcome(invoice.id, invoice.number, action, reason, decided_by, "done"))
-    session.flush()
     return outcomes
 
 
@@ -233,10 +245,12 @@ def approve(session: Session, proposal: Proposal, paypal, edited_body: str | Non
     proposal.decided_at = datetime.now(timezone.utc)
 
     if proposal.action == negotiation.PLAN_EXCEPTION:
-        negotiation.approve_exception(session, proposal, on)
+        offered = negotiation.approve_exception(session, proposal, on)
         proposal.status = "done"
-        audit.record(session, "owner", "approved", invoice.id, action=proposal.action)
-        return "The plan is now offered to the customer."
+        audit.record(session, "owner", "approved", invoice.id, action=proposal.action, offered=offered)
+        if offered:
+            return "The plan is now offered to the customer."
+        return "No new plan was offered, because this invoice already has a plan or nothing is open. Please contact the customer directly."
     if proposal.action in {negotiation.DISPUTE_REVIEW, negotiation.PAYMENT_CHECK}:
         if invoice.status == DISPUTED:
             invoices.resume_after_dispute(session, invoice)

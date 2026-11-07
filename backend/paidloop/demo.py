@@ -36,9 +36,11 @@ def _issue(session: Session, paypal, customer: Customer, lines: list[LineInput],
 
 def reset(session: Session, paypal, buyer_email: str, public_base: str) -> None:
     """Clear everything and create the demo story. PayPal keeps old sandbox invoices, so numbers get a new suffix."""
-    for table in reversed(Base.metadata.sorted_tables):
-        session.execute(table.delete())
-    session.flush()
+    session.rollback()
+    engine = session.get_bind()
+    session.close()
+    Base.metadata.drop_all(engine)  # also picks up new columns after an update
+    Base.metadata.create_all(engine)
 
     session.add(
         Business(

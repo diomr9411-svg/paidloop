@@ -128,7 +128,12 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
               <a className="button" href={`/api/invoices/${id}/xml`}>
                 XML
               </a>
-              {invoice.pay_link && !invoice.plan && (
+              {invoice.credit_note_number && (
+                <a className="button" href={`/api/invoices/${id}/credit-note`}>
+                  Credit note {invoice.credit_note_number}
+                </a>
+              )}
+              {invoice.pay_link && !invoice.plan && invoice.status !== "cancelled" && (
                 <a className="button" href={invoice.pay_link} target="_blank" rel="noreferrer">
                   PayPal link
                 </a>
@@ -198,7 +203,8 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
                   <button
                     disabled={busy}
                     onClick={() => {
-                      const amount = Number((bank || String(invoice.open_cents / 100)).replace(",", "."));
+                      const raw = (bank || String(invoice.open_cents / 100)).trim();
+                      const amount = Number(raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw);
                       if (!(amount > 0)) {
                         setError("Please enter an amount above zero.");
                         return;
@@ -228,7 +234,7 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
                   </button>
                 </div>
               )}
-              {cancelStep && <p className="muted small">The record is kept. The ledger entry is reversed and the PayPal request is cancelled.</p>}
+              {cancelStep && <p className="muted small">The invoice is kept. A legal credit note (Stornorechnung) is created, the ledger entry is reversed, and the PayPal request is cancelled.</p>}
             </div>
           )}
         </section>

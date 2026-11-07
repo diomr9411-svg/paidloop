@@ -31,7 +31,8 @@ def assess(data: RiskInput) -> Risk:
         reasons.append("No payment history yet.")
     elif data.avg_days_late <= 3 and data.unpaid_count == 0:
         score -= 15
-        reasons.append(f"Pays on time: {data.avg_days_late} days late on average over {data.paid_count} invoices.")
+        days = "1 day" if data.avg_days_late == 1 else f"{data.avg_days_late} days"
+        reasons.append(f"Pays on time: {days} late on average over {data.paid_count} invoices.")
     else:
         points = min(data.avg_days_late * 2, 40)
         score += points

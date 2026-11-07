@@ -195,6 +195,7 @@ def invoice_detail(session: Session, invoice: Invoice) -> dict:
         vat_cents=invoice.vat_cents,
         lines=[line_json(line) for line in invoice.lines],
         pay_link=invoice.pay_link,
+        credit_note_number=invoice.credit_note_number,
         public_token=invoice.public_token,
         default_since=invoice.default_since,
         last_reminder_on=invoice.last_reminder_on,
@@ -247,9 +248,9 @@ def capture_json(session: Session, result: capture.CaptureResult) -> dict:
     extracted = result.extracted
     known = None
     if extracted.customer_name:
-        first = extracted.customer_name.split()[0].lower()
+        words = extracted.customer_name.lower().split()
         for customer in session.scalars(select(Customer)):
-            if first in customer.name.lower():
+            if all(word in customer.name.lower() for word in words):
                 known = customer_json(customer)
                 break
     business = invoices.business_of(session)
@@ -258,6 +259,7 @@ def capture_json(session: Session, result: capture.CaptureResult) -> dict:
         "source_text": result.source_text,
         "extracted": extracted.model_dump(),
         "unsure": result.unsure,
+        "warnings": result.warnings,
         "property_work": result.property_work,
         "known_customer": known,
         "today": invoices.today(session),
@@ -296,7 +298,7 @@ def build_ai(settings: Settings) -> AI:
     if not settings.ollama_model:
         return NoAI()
     return LocalAI(settings.ollama_base_url, settings.ollama_model, settings.ai_timeout_seconds,
-                   REPO_ROOT / "data" / "ai_answers.json")
+                   REPO_ROOT / "data" / "ai_answers.json", cpu_only=settings.ai_cpu_only)
 
 
 def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = None) -> FastAPI:
@@ -530,6 +532,11 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
         invoice = invoice_or_404(session, invoice_id)
         return _file(invoice.xml, "application/xml", f"{invoice.number}.xml")
 
+    @app.get("/api/invoices/{invoice_id}/credit-note")
+    def credit_note_pdf(invoice_id: int, session: Session = Depends(get_session, scope="function")) -> Response:
+        invoice = invoice_or_404(session, invoice_id)
+        return _file(invoice.credit_note_pdf, "application/pdf", f"{invoice.credit_note_number}.pdf")
+
     # Follow-up agent and approvals
 
     @app.post("/api/agent/run")
@@ -584,7 +591,7 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
 
     def pay_json(session: Session, invoice: Invoice) -> dict:
         business = invoices.business_of(session)
-        language = invoice.customer.language
+        language = negotiation.language_of_chat(invoice)
         plan = invoice.active_plan
         return {
             "number": invoice.number,

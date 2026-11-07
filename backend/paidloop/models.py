@@ -122,6 +122,9 @@ class Invoice(Base):
     qr_png: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     xml: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     pdf: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    credit_note_number: Mapped[str | None] = mapped_column(String(40), unique=True, nullable=True)
+    credit_note_xml: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    credit_note_pdf: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     public_token: Mapped[str | None] = mapped_column(String(60), unique=True, nullable=True)
 
     reminder_level: Mapped[int] = mapped_column(Integer, default=0)

@@ -24,6 +24,7 @@ from paidloop.models import DISPUTED, ISSUED, ON_PLAN, ChatMessage, Installment,
 from paidloop.money import eur, eur_de, to_cents
 from paidloop.paypal import PaymentRequest, PayPalError, RequestLine
 
+AI_TIMEOUT_SECONDS = 60
 MAX_MESSAGE_CHARS = 1000
 MAX_MESSAGES_PER_HOUR = 30
 PAUSE_AFTER_PAID_CLAIM_DAYS = 3
@@ -59,10 +60,6 @@ CANNOT_PAY = re.compile(
     re.IGNORECASE,
 )
 ASK_OWNER = re.compile(r"\b(?:owner|manager|human|person|inhaber|chef|mensch)\b", re.IGNORECASE)
-GERMAN_HINT = re.compile(
-    r"\b(ich|nicht|kann|bitte|danke|rechnung|zahlen|bezahlt|habe|und|der|die|das|mehr|zeit|raten|guten|hallo)\b",
-    re.IGNORECASE,
-)
 COUNT = re.compile(r"\b(\d{1,2})\s*(?:instal?lments?|payments?|parts?|months?|raten|teile|monate?n?)\b", re.IGNORECASE)
 FIRST = re.compile(
     r"(\d+(?:[.,]\d{1,2})?)\s*(?:€|eur\b|euro\b)\s*(?:now|first|today|jetzt|sofort|heute|zuerst)|"
@@ -103,16 +100,14 @@ class ChatRefused(Exception):
 
 
 def understand(text: str, ai: AI) -> tuple[Understanding, str]:
-    """Code patterns win for rule breaking. The AI helps with everything else."""
-    answer = ai.ask_json(SYSTEM_PROMPT, f"<customer_message>\n{text}\n</customer_message>", Understanding)
-    source = "ai"
+    """Clear messages get an instant answer from rules. The AI helps with the ones rules can't place."""
+    by_rules = _intent_by_rules(text)
+    if by_rules != "question":
+        return Understanding(intent=by_rules), "rules"
+    answer = ai.ask_json(SYSTEM_PROMPT, f"<customer_message>\n{text}\n</customer_message>", Understanding, timeout=AI_TIMEOUT_SECONDS)
     if answer is None:
-        source = "rules"
-        answer = Understanding(intent=_intent_by_rules(text))
-    if NOT_ALLOWED.search(text):
-        answer.intent = "not_allowed"
-        answer.friendly_sentence = ""
-    return answer, source
+        return Understanding(intent="question"), "rules"
+    return answer, "ai"
 
 
 def _intent_by_rules(text: str) -> Intent:
@@ -141,7 +136,7 @@ def _numbers_from_text(text: str) -> tuple[int | None, int | None]:
 
 
 def _language(text: str, invoice: Invoice) -> str:
-    return "de" if GERMAN_HINT.search(text) else "en" if re.search(r"[a-zA-Z]{3}", text) else invoice.customer.language
+    return "de" if messages.looks_german(text) else "en" if re.search(r"[a-zA-Z]{3}", text) else invoice.customer.language
 
 
 def handle_message(session: Session, invoice: Invoice, text: str, ai: AI, paypal) -> ChatReply:
@@ -169,7 +164,7 @@ def handle_message(session: Session, invoice: Invoice, text: str, ai: AI, paypal
     audit.record(session, "customer", "chat_message", invoice.id, intent=intent, understood_by=source)
 
     reply, offer_id = _respond(session, invoice, text, intent, language, on, paypal)
-    opening = messages.safe_ai_sentence(understood.friendly_sentence) if intent in {"cannot_pay_now", "dispute"} else ""
+    opening = messages.safe_ai_sentence(understood.friendly_sentence, language) if intent in {"cannot_pay_now", "dispute"} else ""
     final_text = f"{opening}\n\n{reply}" if opening else reply
     session.add(ChatMessage(invoice=invoice, role="agent", text=final_text, intent=intent))
     session.flush()
@@ -270,7 +265,7 @@ def _offer(session: Session, invoice: Invoice, text: str, language: str, on: dat
     return messages.chat("offer_adjusted" if offer.was_adjusted else "offer", language, plan=summary), plan.id
 
 
-def approve_exception(session: Session, proposal: Proposal, on: date) -> None:
+def approve_exception(session: Session, proposal: Proposal, on: date) -> bool:
     """The owner agrees to talk. Their yes creates a plan only if it is valid for this amount."""
     invoice = proposal.invoice
     data = json.loads(proposal.payload or "{}")
@@ -283,8 +278,8 @@ def approve_exception(session: Session, proposal: Proposal, on: date) -> None:
         reminder_gap_days=limits.reminder_gap_days,
     )
     offer = policy.build_offer(invoice.open_cents, data.get("count"), data.get("first_cents"), on, wide)
-    if offer is None or invoice.active_plan:
-        return
+    if offer is None or invoice.active_plan or invoice.status not in {ISSUED, DISPUTED}:
+        return False
     for old in invoice.plans:
         if old.status == "offered":
             old.status = "declined"
@@ -298,6 +293,7 @@ def approve_exception(session: Session, proposal: Proposal, on: date) -> None:
     language = invoice.customer.language
     text = messages.chat("offer", language, plan=messages.plan_lines([(p.amount_cents, p.due_date) for p in offer.payments], language))
     session.add(ChatMessage(invoice=invoice, role="agent", text=text, intent="cannot_pay_now"))
+    return True
 
 
 def accept_offer(session: Session, invoice: Invoice, plan_id: int, paypal) -> ChatReply:
@@ -349,8 +345,13 @@ def accept_offer(session: Session, invoice: Invoice, plan_id: int, paypal) -> Ch
             installment.paypal_id = paypal_id
             installment.paypal_number = number
             installment.pay_link = state.pay_link
-        if not invoice.paid_cents:
+        try:
             paypal.cancel(invoice.paypal_id, "Replaced by the agreed payment plan.")
+        except PayPalError as error:
+            if not invoice.paid_cents:
+                raise
+            # PayPal may refuse to cancel a part-paid request. The plan still goes ahead and the owner can see this.
+            audit.record(session, "paypal", "old_request_still_open", invoice.id, error=str(error)[:200])
     except PayPalError as error:
         for paypal_id in created:
             try:
@@ -375,7 +376,7 @@ def accept_offer(session: Session, invoice: Invoice, plan_id: int, paypal) -> Ch
     audit.record(session, "customer", "plan_accepted", invoice.id, plan_id=plan.id, payments=len(plan.installments),
                  paypal_ids=created)
 
-    language = _language_of_chat(invoice)
+    language = language_of_chat(invoice)
     money = eur_de if language == "de" else eur
     first = plan.installments[0]
     text = messages.chat("accepted", language, amount=money(first.amount_cents), date=f"{first.due_date:%d.%m.%Y}")
@@ -384,7 +385,7 @@ def accept_offer(session: Session, invoice: Invoice, plan_id: int, paypal) -> Ch
     return ChatReply(text, "plan_accepted", plan.id)
 
 
-def _language_of_chat(invoice: Invoice) -> str:
+def language_of_chat(invoice: Invoice) -> str:
     for message in reversed(invoice.messages):
         if message.role == "customer":
             return _language(message.text, invoice)

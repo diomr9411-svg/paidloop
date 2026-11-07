@@ -19,7 +19,7 @@ class ScriptedAI:
         self.answer = answer
         self.prompts: list[str] = []
 
-    def ask_json(self, system, user, schema):
+    def ask_json(self, system, user, schema, timeout=None):
         self.prompts.append(user)
         return self.answer
 

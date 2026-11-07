@@ -178,6 +178,9 @@ details { margin-top: 0.5rem; font-size: 0.88rem; }
 
 .paypage { max-width: 560px; margin: 0 auto; padding: 1.2rem 1rem 2rem; }
 .pay-head h1 { margin: 0.1rem 0 0.8rem; }
+.pay-top { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.lang-switch { display: flex; gap: 0.2rem; }
+.lang-switch .selected { background: #e8eef7; border-color: var(--accent); font-weight: 600; }
 .plan { list-style: none; margin: 0.3rem 0; padding: 0; }
 .plan li { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid #efeee9; font-size: 0.92rem; }
 .plan li:last-child { border-bottom: 0; }

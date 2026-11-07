@@ -21,13 +21,31 @@ FORBIDDEN = re.compile(
 )
 
 
-def safe_ai_sentence(text: str | None) -> str:
-    """Return the AI's sentence only if it has no numbers, links, promises or threats."""
+GERMAN_HINT = re.compile(
+    r"\b(ich|nicht|kann|bitte|danke|rechnung|zahlen|bezahlt|habe|und|der|die|das|mehr|zeit|raten|guten|hallo|sie|ihre?n?|wir|verstehe|dass)\b",
+    re.IGNORECASE,
+)
+LATIN_ONLY = re.compile(r"^[\sA-Za-zÀ-ÿ.,;:!?'\"()\-–]+$")
+
+
+def looks_german(text: str) -> bool:
+    return bool(GERMAN_HINT.search(text))
+
+
+def safe_ai_sentence(text: str | None, language: str | None = None) -> str:
+    """Return the AI's sentence only if it has no numbers, links, promises or threats.
+
+    Small models sometimes answer in the wrong language or mix alphabets, so that is checked too.
+    """
     if not text:
         return ""
     cleaned = " ".join(text.split())
-    if not 3 <= len(cleaned) <= 220 or FORBIDDEN.search(cleaned):
+    if not 3 <= len(cleaned) <= 220 or FORBIDDEN.search(cleaned) or not LATIN_ONLY.match(cleaned):
         return ""
+    if language and looks_german(cleaned) != (language == "de"):
+        return ""
+    if re.match(r"(guten\s+tag|hallo|hello|hi\b|dear|sehr\s+geehrte)", cleaned, re.IGNORECASE):
+        return ""  # the message already has a greeting
     return cleaned
 
 
@@ -129,19 +147,19 @@ CHAT = {
         "en": "I understand. I can offer you this plan:\n{plan}\nIf this works for you, click \"Accept plan\".",
     },
     "offer_adjusted": {
-        "de": "Das verstehe ich. Genau so kann ich es nicht anbieten, aber das ist der nächste mögliche Plan:\n{plan}\nWenn das passt, klicken Sie auf \"Plan annehmen\". Sonst frage ich gern den Inhaber.",
+        "de": "Das verstehe ich. Genau so kann ich es nicht anbieten, aber das ist der nächste mögliche Plan:\n{plan}\nWenn das passt, klicken Sie auf \"Plan annehmen\". Sonst frage ich gern die Geschäftsleitung.",
         "en": "I understand. I can't offer exactly that, but this is the closest plan I can offer:\n{plan}\nIf this works, click \"Accept plan\". If not, I can ask the owner.",
     },
     "no_plan": {
-        "de": "Für diesen Betrag kann ich selbst keinen Plan anbieten. Ich habe den Inhaber informiert und er meldet sich bei Ihnen.",
+        "de": "Für diesen Betrag kann ich selbst keinen Plan anbieten. Ich habe die Geschäftsleitung informiert. Sie erhalten eine Antwort.",
         "en": "I can't offer a plan myself for this amount. I have told the owner, who will contact you.",
     },
     "asked_owner": {
-        "de": "Ich habe Ihre Anfrage an den Inhaber weitergegeben. Er entscheidet persönlich und meldet sich bei Ihnen.",
+        "de": "Ich habe Ihre Anfrage an die Geschäftsleitung weitergegeben. Sie erhalten eine persönliche Antwort.",
         "en": "I have passed your request to the owner, who will decide personally and contact you.",
     },
     "dispute": {
-        "de": "Danke, dass Sie das sagen. Ich habe die Erinnerungen zu dieser Rechnung angehalten und den Inhaber informiert. Er meldet sich bei Ihnen.",
+        "de": "Danke, dass Sie das sagen. Ich habe die Erinnerungen zu dieser Rechnung angehalten und die Geschäftsleitung informiert. Sie erhalten eine Antwort.",
         "en": "Thank you for telling me. I have paused reminders for this invoice and told the owner, who will contact you.",
     },
     "paid_found": {
@@ -149,15 +167,15 @@ CHAT = {
         "en": "Your payment has arrived. Thank you!",
     },
     "paid_not_found": {
-        "de": "Ich sehe noch keine Zahlung, aber das kann ein paar Tage dauern. Ich halte die Erinnerungen {days} Tage an. Falls Sie einen Beleg haben, schicken Sie ihn bitte an den Inhaber.",
+        "de": "Ich sehe noch keine Zahlung, aber das kann ein paar Tage dauern. Ich halte die Erinnerungen {days} Tage an. Falls Sie einen Beleg haben, schicken Sie ihn bitte an uns.",
         "en": "I can't see a payment yet, but this can take a few days. I have paused reminders for {days} days. If you have a receipt, please send it to the owner.",
     },
     "paid_not_found_again": {
-        "de": "Ich sehe weiterhin keine Zahlung. Ich habe den Inhaber gebeten, das zu prüfen.",
+        "de": "Ich sehe weiterhin keine Zahlung. Ich habe die Geschäftsleitung gebeten, das zu prüfen.",
         "en": "I still can't see a payment. I have asked the owner to check this.",
     },
     "not_allowed": {
-        "de": "Das kann ich nicht ändern. Rabatte, Stornierungen und Erlasse entscheidet nur der Inhaber. Ich kann Ihnen aber eine Ratenzahlung anbieten, wenn das hilft.",
+        "de": "Das kann ich nicht ändern. Über Rabatte, Stornierungen und Erlasse entscheidet nur die Geschäftsleitung. Ich kann Ihnen aber eine Ratenzahlung anbieten, wenn das hilft.",
         "en": "I can't change that. Only the owner can decide on discounts, cancellations or waivers. I can offer you a payment plan if that helps.",
     },
     "question": {

@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = ""
     ai_timeout_seconds: int = 180
+    ai_cpu_only: bool = False
 
     database_url: str = "sqlite:///data/paidloop.db"
     sync_interval_seconds: int = 20

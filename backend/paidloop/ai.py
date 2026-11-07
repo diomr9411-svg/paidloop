@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -21,7 +22,7 @@ Schema = TypeVar("Schema", bound=BaseModel)
 
 
 class AI(Protocol):
-    def ask_json(self, system: str, user: str, schema: type[Schema]) -> Schema | None: ...
+    def ask_json(self, system: str, user: str, schema: type[Schema], timeout: int | None = None) -> Schema | None: ...
 
     def status(self) -> dict[str, object]: ...
 
@@ -29,7 +30,7 @@ class AI(Protocol):
 class NoAI:
     """Used when no local model is available. Every caller already has a rules fallback."""
 
-    def ask_json(self, system: str, user: str, schema: type[Schema]) -> Schema | None:
+    def ask_json(self, system: str, user: str, schema: type[Schema], timeout: int | None = None) -> Schema | None:
         return None
 
     def status(self) -> dict[str, object]:
@@ -44,8 +45,14 @@ class LocalAI:
         timeout: int = 180,
         answers_file: Path | None = None,
         http: httpx.Client | None = None,
+        cpu_only: bool = False,
     ) -> None:
         self._model = model
+        # A small graphics card can make a model slower than the processor alone. We measured 2 vs 8 tokens a second.
+        self._options = {"temperature": 0, "num_ctx": 2048, "num_predict": 400}
+        if cpu_only:
+            self._options.update(num_gpu=0, num_thread=max((os.cpu_count() or 4) - 2, 2))
+        self._timeout = timeout
         self._http = http or httpx.Client(base_url=base_url, timeout=timeout)
         self._answers_file = answers_file
         self._answers: dict[str, str] = {}
@@ -86,7 +93,7 @@ class LocalAI:
                 self._answers_file.parent.mkdir(parents=True, exist_ok=True)
                 self._answers_file.write_text(json.dumps(self._answers), encoding="utf-8")
 
-    def ask_json(self, system: str, user: str, schema: type[Schema]) -> Schema | None:
+    def ask_json(self, system: str, user: str, schema: type[Schema], timeout: int | None = None) -> Schema | None:
         key = self._key(system, user, schema)
         saved = self._answers.get(key)
         if saved is not None:
@@ -101,11 +108,11 @@ class LocalAI:
             "stream": False,
             "format": schema.model_json_schema(),
             "keep_alive": "20m",
-            "options": {"temperature": 0, "num_ctx": 4096, "num_predict": 512},
+            "options": self._options,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }
         try:
-            response = self._http.post("/api/chat", json=body)
+            response = self._http.post("/api/chat", json=body, timeout=timeout or self._timeout)
             response.raise_for_status()
             content = response.json()["message"]["content"]
             result = schema.model_validate_json(content)

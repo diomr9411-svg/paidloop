@@ -103,6 +103,16 @@ def test_customer_story_through_public_links(api):
     assert api.get("/api/dashboard").json()["cash_cents"] == 45220
 
 
+def test_page_follows_the_language_the_customer_writes_in(api):
+    invoice = create_issued(api)
+    token = invoice["public_token"]
+    assert api.get(f"/api/pay/{token}").json()["language"] == "de"
+    api.post(f"/api/pay/{token}/chat", json={"text": "I can't pay it all right now"})
+    assert api.get(f"/api/pay/{token}").json()["language"] == "en"
+    api.post(f"/api/pay/{token}/chat", json={"text": "Ich kann gerade nicht alles bezahlen"})
+    assert api.get(f"/api/pay/{token}").json()["language"] == "de"
+
+
 def test_bad_token_gives_nothing(api):
     create_issued(api)
     for path in ["/api/pay/short", "/api/pay/this-token-does-not-exist-anywhere-at-all"]:
@@ -154,6 +164,7 @@ def test_cancel_then_nothing_is_open(api):
     assert api.post(f"/api/invoices/{invoice['id']}/cancel", json={"reason": "Mistake"}).json()["status"] == "cancelled"
     assert api.get("/api/dashboard").json()["open_cents"] == 0
     assert api.get("/api/ledger").json()["accounts"]["receivable"] == 0
+    assert api.get(f"/api/invoices/{invoice['id']}/credit-note").content.startswith(b"%PDF")
 
 
 def test_capture_and_draft_correction_flow(api):
@@ -183,6 +194,14 @@ def test_small_invoice_without_address_still_makes_a_valid_einvoice(api):
         "issue_date": today, "due_date": today}).json()
     assert api.post(f"/api/invoices/{draft['id']}/check").json()["can_issue"] is True
     assert api.post(f"/api/invoices/{draft['id']}/issue").status_code == 200
+
+
+def test_similar_customer_name_is_not_matched_by_mistake(api):
+    api.post("/api/customers", json={"name": "Café Beispiel UG", "email": "c@example.com"})
+    other = api.post("/api/capture/text", json={"text": "2 hours repair at Café Sonne at 65 euro"}).json()
+    assert other["known_customer"] is None
+    same = api.post("/api/capture/text", json={"text": "2 hours repair at Café Beispiel at 65 euro"}).json()
+    assert same["known_customer"]["name"] == "Café Beispiel UG"
 
 
 def test_upload_is_checked_and_reads_pdf(api):
