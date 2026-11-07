@@ -39,6 +39,7 @@ So many late payers only need a good reminder at the right time, while others re
 
 - **English and German everywhere.** Owner screens, error messages, legal checks, reasons and the audit trail follow the language switch. Invoices, PDFs, reminders and the customer page use the customer's language. Money and dates use the right local format.
 - **Designed with usability and industrial engineering methods:** a "Next steps" work queue, one approval at a time, a four-step invoice flow, error-proofing, a PayPal status light, and measured time to get paid. See [docs/USABILITY.md](docs/USABILITY.md), which also says what was not tested yet.
+- **Built to a written UI rulebook:** design tokens, dark theme, compact view, loading skeletons, card lists on phones, and automatic checks at 5 screen widths. See [docs/UI-RULES-APPLIED.md](docs/UI-RULES-APPLIED.md).
 - **Stored data uses indexes.** Lists come one page at a time, screens don't run one query per row, and PDFs load only when asked for. Tests check the query plans, and `scripts/benchmark_indexes.py` measures 20,000 invoices.
 
 ## Why the AI can't break anything

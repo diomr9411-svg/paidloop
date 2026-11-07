@@ -69,23 +69,23 @@ The app measures the real time for every invoice and shows the average on Home. 
 
 Lists, filters and the home screen use database indexes, and files such as PDFs load only when asked for. `tests/test_indexes.py` checks that each main query uses its index, and that a screen runs the same number of queries for 20 rows and 100 rows.
 
-Measured with `scripts/benchmark_indexes.py` on the development laptop: 20,000 invoices, 1,000 customers, about 2 in 100 open, median of 5 requests, in milliseconds. The server was the only thing being tested, so a browser adds its own time.
+Measured with `scripts/benchmark_indexes.py` on the development laptop: 20,000 invoices, 1,000 customers, about 2 in 100 open, median of 5 requests, in milliseconds. The server was the only thing being tested, so a browser adds its own time. The rules for the screens are in [UI-RULES-APPLIED.md](UI-RULES-APPLIED.md).
 
 | Screen | With indexes | Without |
 |---|---:|---:|
-| Home screen | 117 | 151 |
-| Invoice list, newest | 22 | 43 |
-| Invoice list, page 200 | 22 | 44 |
-| Filter: overdue | 23 | 51 |
-| Filter: paid, sorted by amount | 23 | 62 |
-| All, sorted by due date | 20 | 53 |
-| All, sorted by customer | 38 | 58 |
-| Search by customer | 39 | 55 |
-| Search by number | 37 | 56 |
-| Approvals | 24 | 24 |
-| Audit list | 9 | 10 |
+| Home screen | 182 | 227 |
+| Invoice list, newest | 31 | 63 |
+| Invoice list, page 200 | 31 | 59 |
+| Filter: overdue | 31 | 72 |
+| Filter: paid, sorted by amount | 32 | 89 |
+| All, sorted by due date | 28 | 71 |
+| All, sorted by customer | 53 | 85 |
+| Search by customer | 29 | 77 |
+| Search by number | 27 | 69 |
+| Approvals | 43 | 30 |
+| Audit list | 13 | 12 |
 
-At this size the gain is about 2 times on lists, and small on Approvals and the audit list, where few rows are read. Searching for a word inside a name or number has to read a whole index, so it does not get the full benefit.
+The times are from a second run on the same laptop and are slower overall than the first run, because other programs were running, so only compare the two columns within one table. Lists and filters are about 2 times faster with indexes. Search is now a prefix search on an index range, so it gets the full benefit (about 2.5 times). Approvals and the audit list read very few rows, so indexes don't help there and the difference is noise.
 
 ## Test plan with real users (not done yet)
 

@@ -264,8 +264,8 @@ kbd { font-family: var(--font-mono); font-size: var(--text-xs); padding: 0 var(-
 .filter { border-radius: var(--radius-pill); font-size: var(--text-meta); min-height: var(--size-toolbar); padding: 0 var(--space-group); }
 .filter.selected { background: var(--selected-bg); color: var(--selected-text); border-color: var(--primary); font-weight: var(--weight-semibold); }
 .count { font-variant-numeric: tabular-nums; opacity: 0.8; }
-.search { flex: 1 1 15rem; max-width: 22rem; display: flex; gap: var(--space-item); align-items: center; }
-.sort-select { display: block; }
+.search { flex: 1 1 15rem; max-width: 22rem; display: flex; flex-wrap: wrap; gap: var(--space-item); align-items: center; }
+.sort-select { display: block; flex: 1 1 100%; }
 .sort { border: 0; background: none; padding: 0; min-height: 0; font-weight: var(--weight-semibold); color: var(--text-muted); font-size: var(--text-meta); }
 .sort:hover:not(:disabled) { background: none; color: var(--text); text-decoration: underline; }
 .pager { display: flex; align-items: center; justify-content: space-between; gap: var(--space-group); flex-wrap: wrap; }
