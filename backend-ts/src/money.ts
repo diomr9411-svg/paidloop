@@ -10,7 +10,7 @@ export function divideRoundHalfUp(numerator: number, denominator: number): numbe
 
 /** Euros as text or number to cents, rounding half up as invoices normally do. */
 export function toCents(value: string | number): number {
-  const text = typeof value === "number" ? String(value) : value.trim();
+  const text = typeof value === "number" ? value.toFixed(6) : value.trim();
   const match = /^(-?)(\d*)(?:\.(\d*))?$/.exec(text);
   if (!match || (!match[2] && !match[3])) throw new Error(`Not an amount: ${text}`);
   const sign = match[1] ? -1 : 1;
