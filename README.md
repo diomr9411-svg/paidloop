@@ -86,8 +86,8 @@ Everything is free. You need Node 22 or newer (24 is what it was built and teste
 
 ```bash
 cp .env.example .env
-cd frontend && npm install && npm run build && cd ..
-cd backend && npm install && npm start
+cd frontend && npm install --ignore-scripts && npm run build && cd ..
+cd backend && npm install --ignore-scripts && npm start
 ```
 
 Open http://localhost:8000 and click **Reset demo**.
