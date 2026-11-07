@@ -10,7 +10,8 @@ import { Db } from "./db";
 import * as followup from "./followup";
 import * as invoices from "./invoices";
 import * as ledger from "./ledger";
-import { activePlan, businessOf, customerOf, getCustomer, getInvoice, Invoice, isPaidInstallment, openCents, PaymentPlan, plansOf } from "./repo";
+import { customersByIds, invoicesByIds, plansByInvoiceIds } from "./loaders";
+import { activePlan, businessOf, Customer, Invoice, isPaidInstallment, openCents, PaymentPlan } from "./repo";
 import { Risk } from "./risk";
 import { CHECKED, DISPUTED, DRAFT, ISSUED, ON_PLAN, PAID } from "./states";
 
@@ -70,33 +71,37 @@ interface QueueItem {
 }
 
 /** Most valuable work first, one clear next step each: the owner pulls from this list. */
-function buildQueue(db: Db, openRows: Invoice[], on: IsoDate): QueueItem[] {
+function buildQueue(db: Db, openRows: Invoice[], plansById: Map<number, PaymentPlan[]>, customers: Map<number, Customer>, on: IsoDate): QueueItem[] {
   const queue: QueueItem[] = [];
-  const withPending = new Set<number>();
-  for (const proposal of db.query("SELECT id, invoice_id, action FROM proposal WHERE status = 'pending' ORDER BY id")) {
-    withPending.add(proposal.invoice_id);
-    const invoice = getInvoice(db, proposal.invoice_id)!;
+  const pending = db.query("SELECT invoice_id, action FROM proposal WHERE status = 'pending' ORDER BY id");
+  const withPending = new Set<number>(pending.map((p) => p.invoice_id as number));
+  const approvalInvoices = invoicesByIds(db, withPending);
+  const approvalPlans = plansByInvoiceIds(db, withPending);
+  const approvalCustomers = customersByIds(db, [...approvalInvoices.values()].map((invoice) => invoice.customer_id));
+  for (const proposal of pending) {
+    const invoice = approvalInvoices.get(proposal.invoice_id)!;
     queue.push({
       kind: "approval", action: proposal.action, invoice_id: invoice.id, number: invoice.number,
-      customer: customerOf(db, invoice)?.name ?? "", amount_cents: openCents(invoice),
-      days_late: Math.max(invoices.daysOverdue(invoice, on, plansOf(db, invoice.id)), 0),
+      customer: approvalCustomers.get(invoice.customer_id ?? -1)?.name ?? "", amount_cents: openCents(invoice),
+      days_late: Math.max(invoices.daysOverdue(invoice, on, approvalPlans.get(invoice.id) ?? []), 0),
     });
   }
   for (const invoice of openRows) {
-    const days = invoices.daysOverdue(invoice, on, plansOf(db, invoice.id));
+    const days = invoices.daysOverdue(invoice, on, plansById.get(invoice.id) ?? []);
     if (withPending.has(invoice.id) || days <= 0 || invoice.status === DISPUTED) continue;
     if (invoice.last_reminder_on === null) {
       queue.push({
         kind: "no_reminder_yet", action: "", invoice_id: invoice.id, number: invoice.number,
-        customer: customerOf(db, invoice)!.name, amount_cents: openCents(invoice), days_late: days,
+        customer: customers.get(invoice.customer_id ?? -1)!.name, amount_cents: openCents(invoice), days_late: days,
       });
     }
   }
   const drafts = db.rows("invoice", `SELECT ${db.columns("invoice")} FROM invoice WHERE status IN (?, ?) ORDER BY id DESC LIMIT ?`, DRAFT, CHECKED, QUEUE_SIZE) as Invoice[];
+  const draftCustomers = customersByIds(db, drafts.map((invoice) => invoice.customer_id));
   for (const invoice of drafts) {
     queue.push({
       kind: "draft", action: "", invoice_id: invoice.id, number: null,
-      customer: getCustomer(db, invoice.customer_id)?.name ?? "", amount_cents: invoice.gross_cents, days_late: 0,
+      customer: draftCustomers.get(invoice.customer_id ?? -1)?.name ?? "", amount_cents: invoice.gross_cents, days_late: 0,
     });
   }
   const order = { approval: 0, no_reminder_yet: 1, draft: 2 };
@@ -108,8 +113,9 @@ export function build(db: Db) {
   const on = invoices.today(db);
   const business = businessOf(db);
   const openRows = db.rows("invoice", `SELECT ${db.columns("invoice")} FROM invoice WHERE status IN (?, ?, ?)`, ISSUED, ON_PLAN, DISPUTED) as Invoice[];
-  const plansById = new Map(openRows.map((invoice) => [invoice.id, plansOf(db, invoice.id)]));
-  const days = (invoice: Invoice): number => invoices.daysOverdue(invoice, on, plansById.get(invoice.id)!);
+  const plansById = plansByInvoiceIds(db, openRows.map((invoice) => invoice.id));
+  const customers = customersByIds(db, openRows.map((invoice) => invoice.customer_id));
+  const days = (invoice: Invoice): number => invoices.daysOverdue(invoice, on, plansById.get(invoice.id) ?? []);
 
   const overdue = openRows.filter((invoice) => days(invoice) > 0);
   const cash = ledger.balance(db, ledger.CASH);
@@ -132,8 +138,8 @@ export function build(db: Db) {
       buckets.at_risk += openCents(invoice);
       continue;
     }
-    const customer = customerOf(db, invoice)!;
-    const plans = plansById.get(invoice.id)!;
+    const customer = customers.get(invoice.customer_id ?? -1)!;
+    const plans = plansById.get(invoice.id) ?? [];
     const assessed = followup.riskOf(db, invoice, customer, plans, on, stats);
     for (const item of expectedPayments(invoice, plans, assessed, on)) {
       if (item.risk === "high") buckets.at_risk += item.amount_cents;
@@ -168,7 +174,7 @@ export function build(db: Db) {
     forecast: buckets,
     aging,
     performance: results,
-    queue: buildQueue(db, openRows, on),
+    queue: buildQueue(db, openRows, plansById, customers, on),
     upcoming: upcoming.sort((a, b) => (a.expected_on < b.expected_on ? -1 : a.expected_on > b.expected_on ? 1 : 0)).slice(0, 8),
     ledger_balanced: debit === credit,
   };

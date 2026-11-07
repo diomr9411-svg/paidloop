@@ -32,6 +32,8 @@ export class Db {
   readonly raw: Database.Database;
   readonly path: string;
   private readonly statements = new Map<string, Database.Statement>();
+  /** Tests set this to see every statement that runs (for counting queries). */
+  trace: ((sql: string) => void) | null = null;
 
   constructor(url: string) {
     this.path = databasePath(url);
@@ -180,6 +182,7 @@ export class Db {
   }
 
   private statement(sql: string): Database.Statement {
+    this.trace?.(sql);
     let statement = this.statements.get(sql);
     if (!statement) {
       statement = this.raw.prepare(sql);
