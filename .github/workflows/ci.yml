@@ -1,0 +1,113 @@
+name: CI
+
+# Runs on every push and pull request. It needs no secrets: PayPal runs as the built-in simulator
+# and the AI is off, so the fixed rules do the work. Free for public repositories.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Server (types and 313 tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - name: Type check
+        run: npm run check
+        working-directory: backend
+      - name: Tests
+        run: npm test
+        working-directory: backend
+
+  screens-build:
+    name: Screens (UI rules, types, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - name: UI rules check, type check and build
+        run: npm run build
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screens
+          path: frontend/dist
+          retention-days: 7
+
+  screens-walk:
+    name: Screens in a real browser (143 checks)
+    needs: [server, screens-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: screens
+          path: frontend/dist
+      - run: npm ci
+        working-directory: backend
+      - run: npm ci
+        working-directory: frontend
+      - name: Start the app and make the demo data
+        run: |
+          cd backend
+          nohup npm start > ../server.log 2>&1 &
+          for i in $(seq 1 40); do curl -sf http://127.0.0.1:8000/api/health > /dev/null && break; sleep 2; done
+          curl -sf --max-time 180 -X POST http://127.0.0.1:8000/api/demo/reset
+      - name: Walk every screen at 5 widths, in light, dark, German, compact and reduced motion
+        run: npm run walk
+        working-directory: frontend
+        env:
+          CI: "true"
+          CHROME_PATH: /usr/bin/google-chrome
+      - name: Show the server log if something failed
+        if: failure()
+        run: tail -n 80 server.log
+
+  package:
+    name: Package the app (main branch only)
+    if: github.ref == 'refs/heads/main'
+    needs: [server, screens-build, screens-walk]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: screens
+          path: frontend/dist
+      - name: Make one zip with the server code and the built screens
+        run: |
+          zip -r paidloop.zip backend/src backend/assets backend/package.json backend/package-lock.json backend/tsconfig.json \
+            frontend/dist README.md LICENSE THIRD_PARTY_NOTICES.md .env.example start.bat docs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paidloop-app
+          path: paidloop.zip
+          retention-days: 30

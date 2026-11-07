@@ -10,9 +10,9 @@ const BASE = process.env.UI_URL || "http://127.0.0.1:8000";
 const PORT = 9333 + Math.floor(Math.random() * 400);
 const SHOTS = process.env.SHOTS || "";
 const CHROME = [
+  process.env.CHROME_PATH,
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
   "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-  process.env.CHROME_PATH,
 ].find((path) => path && existsSync(path));
 if (!CHROME) throw new Error("Chrome not found. Set CHROME_PATH.");
 const axeSource = readFileSync(new URL("../node_modules/axe-core/axe.min.js", import.meta.url), "utf8");
@@ -51,7 +51,7 @@ const VARIANTS = [
 // ------------------------------------------------------------------ Chrome over its debugging port
 const profile = join(tmpdir(), `paidloop-walk-${Date.now()}`);
 mkdirSync(profile, { recursive: true });
-const chrome = spawn(CHROME, [`--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, "--headless=new", "--no-first-run", "--disable-gpu", "--hide-scrollbars", "about:blank"], { stdio: "ignore" });
+const chrome = spawn(CHROME, [`--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, "--headless=new", "--no-first-run", "--disable-gpu", "--hide-scrollbars", ...(process.env.CI ? ["--no-sandbox"] : []), "about:blank"], { stdio: "ignore" });
 const cleanup = () => {
   chrome.kill();
   try {
