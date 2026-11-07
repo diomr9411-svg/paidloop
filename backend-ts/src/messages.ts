@@ -20,7 +20,7 @@ const GERMAN_HINT = new RegExp(
   `${START}(ich|nicht|kann|bitte|danke|rechnung|zahlen|bezahlt|habe|und|der|die|das|mehr|zeit|raten|guten|hallo|sie|ihre?n?|wir|verstehe|dass)${END}`,
   "iu",
 );
-const LATIN_ONLY = /^[\sA-Za-zÀ-ÿ.,;:!?'"()\-–]+$/;
+export const LATIN_ONLY = /^[\sA-Za-zÀ-ÿ.,;:!?'"()\-–]+$/;
 const GREETING = new RegExp(`^(guten\\s+tag|hallo|hello|hi${END}|dear|sehr\\s+geehrte)`, "iu");
 
 export const looksGerman = (text: string): boolean => GERMAN_HINT.test(text);

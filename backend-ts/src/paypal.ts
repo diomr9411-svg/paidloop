@@ -362,7 +362,7 @@ export class SimulatedPayPal implements PayPalApi {
     return key;
   }
 
-  async send(paypalId: string): Promise<void> {
+  async send(paypalId: string, _notifyCustomer = true): Promise<void> {
     this.maybeFail("send");
     this.invoice(paypalId).status = "SENT";
     this.save();
@@ -392,7 +392,7 @@ export class SimulatedPayPal implements PayPalApi {
     this.save();
   }
 
-  async cancel(paypalId: string): Promise<void> {
+  async cancel(paypalId: string, _note = ""): Promise<void> {
     this.maybeFail("cancel");
     this.invoice(paypalId).status = "CANCELLED";
     this.save();
