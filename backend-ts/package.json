@@ -1,0 +1,44 @@
+{
+  "name": "paidloop-backend",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "PaidLoop backend in TypeScript (NestJS). Replaces the Python backend.",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "tsx src/main.ts",
+    "test": "vitest run",
+    "check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.4.0",
+    "@nestjs/core": "^12.4.0",
+    "@nestjs/platform-express": "^12.4.0",
+    "@pdf-lib/fontkit": "^1.1.1",
+    "@stackforge-eu/factur-x": "^1.4.3",
+    "@tesseract.js-data/deu": "^1.0.0",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "better-sqlite3": "^13.0.3",
+    "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "saxon-js": "^2.7.0",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@swc/core": "^1.16.22",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^26.6.6",
+    "@types/qrcode": "^1.5.6",
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.3.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "unplugin-swc": "^2.0.0",
+    "vitest": "^5.1.0",
+    "xslt3": "^2.7.0"
+  }
+}
