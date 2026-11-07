@@ -15,3 +15,11 @@ Notes
 - Saxon-JS licence (Saxonica) allows use inside an app, not hosting the package for others. List it in THIRD_PARTY_NOTICES before release.
 - The library asks for a delivery date in the EN 16931 profile. The legal check in our app already requires a service date.
 - Not yet proven by an outside PDF/A validator (the Python version was not either).
+
+# Spike 2 (8 Nov 2026): OCR, SQLite, Ollama in Node
+
+| Check | Result |
+|---|---|
+| `tesseract.js` with German data from npm (`@tesseract.js-data/deu`), no download at run time | reads a German note, 6 of 6 key words, about 1.3 s |
+| `better-sqlite3` + Drizzle, WAL, indexes | prefix search on 20,000 rows uses the index, 6.6 ms |
+| Ollama (`qwen2.5:3b`) over plain `fetch` | reachable, no extra library needed |
