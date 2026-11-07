@@ -40,7 +40,7 @@ So many late payers only need a good reminder at the right time, while others re
 - **English and German everywhere.** Owner screens, error messages, legal checks, reasons and the audit trail follow the language switch. Invoices, PDFs, reminders and the customer page use the customer's language. Money and dates use the right local format.
 - **Designed with usability and industrial engineering methods:** a "Next steps" work queue, one approval at a time, a four-step invoice flow, error-proofing, a PayPal status light, and measured time to get paid. See [docs/USABILITY.md](docs/USABILITY.md), which also says what was not tested yet.
 - **Built to a written UI rulebook:** design tokens, dark theme, compact view, loading skeletons, card lists on phones, and automatic checks at 5 screen widths. See [docs/UI-RULES-APPLIED.md](docs/UI-RULES-APPLIED.md).
-- **Stored data uses indexes.** Lists come one page at a time, screens don't run one query per row, and PDFs load only when asked for. Tests check the query plans, and `scripts/benchmark_indexes.py` measures 20,000 invoices.
+- **Stored data uses indexes.** Lists come one page at a time, screens don't run one query per row, and PDFs load only when asked for. Tests check the query plans, and `npm run benchmark` in `backend` measures 20,000 invoices.
 
 ## Why the AI can't break anything
 
@@ -65,12 +65,12 @@ We tested the free model on this hardware and found real mistakes: it wrote 1 ho
 ## How it is built
 
 ```
-React + Vite (screens)
+React + Vite (screens, TypeScript)
       |
-FastAPI (Python)
+NestJS (TypeScript)
   |-- capture     rules first, local AI for messy notes, free OCR for photos
   |-- compliance  German invoice rules, fixed code
-  |-- einvoice    ZUGFeRD PDF and XML, official EN 16931 rules in a separate process
+  |-- einvoice    ZUGFeRD PDF and XML, official EN 16931 rules
   |-- paypal      Invoicing API: create, send, QR, remind, record payment, cancel, search, webhooks
   |-- followup    AI proposes -> policy gate checks -> code acts
   |-- negotiation customer chat, offers only from code
@@ -82,14 +82,12 @@ SQLite
 
 ## Run it
 
-Everything is free. You need Python 3.12 and Node 18 or newer. These commands are for Git Bash on Windows. On macOS or Linux, use `.venv/bin/python`.
+Everything is free. You need Node 22 or newer (24 is what it was built and tested on). One language, TypeScript, runs both the screens and the server.
 
 ```bash
-python -m venv .venv
-.venv/Scripts/python -m pip install -r backend/requirements.txt
 cp .env.example .env
 cd frontend && npm install && npm run build && cd ..
-cd backend && ../.venv/Scripts/python -m paidloop
+cd backend && npm install && npm start
 ```
 
 Open http://localhost:8000 and click **Reset demo**.
@@ -106,21 +104,23 @@ Open http://localhost:8000 and click **Reset demo**.
 
 ```bash
 cd backend
-../.venv/Scripts/python -m pytest
+npm test          # 313 tests
+npm run check     # type check
 ```
 
 With the app running against the real sandbox:
 
 ```bash
-.venv/Scripts/python scripts/e2e_sandbox.py
+cd backend
+npm run e2e
 ```
 
 ## Tools used
 
 - **PayPal:** Invoicing API v2 and webhook verification, in the sandbox.
 - **AI in the product:** Ollama with the free Qwen 2.5 3B model, running locally.
-- **E-invoice:** drafthorse, Saxon-HE, and the official EN 16931 rules from the EU project.
-- **Others:** FastAPI, SQLAlchemy, React, Vite, ReportLab, pypdf, RapidOCR.
+- **E-invoice:** @stackforge-eu/factur-x, Saxon-JS, and the official EN 16931 rules from the EU project.
+- **Others:** NestJS, better-sqlite3, zod, React, Vite, pdf-lib, pdf.js, Tesseract.js (free offline text reading).
 - **AI help while building:** the code was written with Claude Code, under the author's direction and with the author's review.
 
 See `THIRD_PARTY_NOTICES.md` for licenses.

@@ -5,10 +5,15 @@
   "license": "MIT",
   "description": "PaidLoop backend in TypeScript (NestJS). Replaces the Python backend.",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
     "start": "tsx src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start:built": "node dist/src/main.js",
     "test": "vitest run",
-    "check": "tsc --noEmit -p tsconfig.json"
+    "check": "tsc --noEmit -p tsconfig.json",
+    "benchmark": "tsx scripts/benchmark-indexes.ts",
+    "e2e": "tsx scripts/e2e-sandbox.ts",
+    "compare": "node scripts/compare-api.mjs",
+    "build:rules": "node scripts/build-rules.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^12.4.0",

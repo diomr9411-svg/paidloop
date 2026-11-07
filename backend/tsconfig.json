@@ -8,10 +8,16 @@
     "emitDecoratorMetadata": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "outDir": "dist",
     "rootDir": ".",
     "noUncheckedIndexedAccess": false
   },
-  "include": ["src", "test"]
+  "include": [
+    "src",
+    "test",
+    "scripts/*.ts"
+  ]
 }

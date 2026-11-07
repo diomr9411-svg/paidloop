@@ -67,25 +67,25 @@ The app measures the real time for every invoice and shows the average on Home. 
 
 ## Fast data
 
-Lists, filters and the home screen use database indexes, and files such as PDFs load only when asked for. `tests/test_indexes.py` checks that each main query uses its index, and that a screen runs the same number of queries for 20 rows and 100 rows.
+Lists, filters and the home screen use database indexes, and files such as PDFs load only when asked for. `backend/test/indexes.test.ts` checks that each main query uses its index, and that a screen runs the same number of queries for 20 rows and 100 rows.
 
-Measured with `scripts/benchmark_indexes.py` on the development laptop: 20,000 invoices, 1,000 customers, about 2 in 100 open, median of 5 requests, in milliseconds. The server was the only thing being tested, so a browser adds its own time. The rules for the screens are in [UI-RULES-APPLIED.md](UI-RULES-APPLIED.md).
+Measured with `npm run benchmark` (in `backend`) on the development laptop: 20,000 invoices, 1,000 customers, about 2 in 100 open, median of 5 requests, in milliseconds. The server was the only thing being tested, so a browser adds its own time. The rules for the screens are in [UI-RULES-APPLIED.md](UI-RULES-APPLIED.md).
 
 | Screen | With indexes | Without |
 |---|---:|---:|
-| Home screen | 182 | 227 |
-| Invoice list, newest | 31 | 63 |
-| Invoice list, page 200 | 31 | 59 |
-| Filter: overdue | 31 | 72 |
-| Filter: paid, sorted by amount | 32 | 89 |
-| All, sorted by due date | 28 | 71 |
-| All, sorted by customer | 53 | 85 |
-| Search by customer | 29 | 77 |
-| Search by number | 27 | 69 |
-| Approvals | 43 | 30 |
-| Audit list | 13 | 12 |
+| Home screen | 33 | 43 |
+| Invoice list, newest | 9 | 14 |
+| Invoice list, page 200 | 8 | 13 |
+| Filter: overdue | 8 | 17 |
+| Filter: paid, sorted by amount | 7 | 65 |
+| All, sorted by due date | 7 | 58 |
+| All, sorted by customer | 12 | 68 |
+| Search by customer | 6 | 54 |
+| Search by number | 6 | 53 |
+| Approvals | 4 | 11 |
+| Audit list | 3 | 7 |
 
-The times are from a second run on the same laptop and are slower overall than the first run, because other programs were running, so only compare the two columns within one table. Lists and filters are about 2 times faster with indexes. Search is now a prefix search on an index range, so it gets the full benefit (about 2.5 times). Approvals and the audit list read very few rows, so indexes don't help there and the difference is noise.
+Without indexes, sorting and searching are about 8 to 10 times slower, because every row has to be read. Home and the plain list read few rows, so the gain there is small. These numbers are from the TypeScript server. The earlier Python server was slower in every row (Home 182 ms, list 31 ms) with the same data and the same indexes.
 
 ## Test plan with real users (not done yet)
 
