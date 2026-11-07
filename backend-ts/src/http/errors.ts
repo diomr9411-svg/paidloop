@@ -47,6 +47,10 @@ export class ApiExceptionFilter implements ExceptionFilter {
       if (request.path.endsWith("/paypal/webhook")) return send(400, { detail: "Not JSON" });
       return send(422, { detail: t("Please check the values you entered.", "Bitte prüfen Sie Ihre Eingaben.").get(language), fields: [] });
     }
+    if (status === 413) {
+      // The upload limit was hit before our own check, so it gets the same clear message
+      return send(422, { detail: t("The file is larger than 5 MB.", "Die Datei ist größer als 5 MB.").get(language) });
+    }
     if (typeof status === "number" && status >= 400 && status < 500) {
       const notFound = status === 404;
       return send(status, { detail: notFound ? NOT_FOUND.get(language) : String((error as Error).message) });
