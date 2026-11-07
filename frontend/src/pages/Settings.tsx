@@ -1,92 +1,117 @@
 import { useEffect, useState } from "react";
 
-import { api, put } from "../api";
+import { api, ApiError, put } from "../api";
+import { ErrorBox, Field, Loading, useToast } from "../components";
+import { Key, useT } from "../i18n";
 
 export function Settings({ refresh }: { refresh: () => void }) {
+  const { t } = useT();
+  const toast = useToast();
   const [form, setForm] = useState<any>(null);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [bad, setBad] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    api("/api/business").then(setForm).catch((e) => setError(e.message));
-  }, []);
+    api("/api/business")
+      .then((data) => {
+        setForm(data);
+        setError("");
+      })
+      .catch((e) => setError(e.message));
+  }, [attempt]);
 
-  if (error && !form) return <div className="alert error">{error}</div>;
-  if (!form) return <p className="muted">Loading...</p>;
+  if (error && !form) return <ErrorBox text={error} onRetry={() => setAttempt((a) => a + 1)} />;
+  if (!form) return <Loading />;
 
-  const text = (key: string, label: string) => (
-    <label>
-      {label}
-      <input value={form[key] ?? ""} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
-    </label>
+  const change = (key: string, value: unknown) => {
+    setForm({ ...form, [key]: value });
+    setBad((all) => all.filter((name) => name !== key));
+    setDirty(true);
+  };
+  const problem = (key: string) => (bad.includes(key) ? t("invalidValue") : undefined);
+
+  const text = (key: string, label: Key) => (
+    <Field id={`business-${key}`} label={t(label)} error={problem(key)}>
+      <input value={form[key] ?? ""} onChange={(event) => change(key, event.target.value)} />
+    </Field>
   );
-  const number = (key: string, label: string, hint: string) => (
-    <label>
-      {label}
-      <input type="number" value={form[key]} onChange={(e) => setForm({ ...form, [key]: Number(e.target.value) })} />
-      <span className="muted small">{hint}</span>
-    </label>
+  const number = (key: string, label: Key, hint: Key) => (
+    <Field id={`business-${key}`} label={t(label)} hint={t(hint)} error={problem(key)}>
+      <input type="number" value={form[key]} onChange={(event) => change(key, event.target.value === "" ? "" : Number(event.target.value))} />
+    </Field>
   );
 
   async function save() {
+    setBusy(true);
     setError("");
-    setMessage("");
+    setBad([]);
     try {
       setForm(await put("/api/business", form));
-      setMessage("Saved.");
+      setDirty(false);
+      toast(t("saved"));
       refresh();
     } catch (e) {
       setError((e as Error).message);
+      if (e instanceof ApiError) setBad(e.fields);
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
-    <>
-      <h1>Settings</h1>
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        save();
+      }}
+    >
+      <h1>{t("settings")}</h1>
       <section className="card">
-        <h2>Your business</h2>
+        <h2>{t("yourBusiness")}</h2>
         <div className="form-grid">
-          {text("name", "Name")}
-          {text("email", "Email")}
-          {text("street", "Street")}
+          {text("name", "name")}
+          {text("email", "emailPlain")}
+          {text("street", "street")}
           <div className="form-pair">
-            {text("postcode", "Postcode")}
-            {text("city", "City")}
+            {text("postcode", "postcode")}
+            {text("city", "city")}
           </div>
-          {text("vat_id", "VAT ID (USt-IdNr.)")}
-          {text("tax_number", "Tax number (Steuernummer)")}
-          <label>
-            VAT method
-            <select value={form.vat_method} onChange={(e) => setForm({ ...form, vat_method: e.target.value })}>
-              <option value="soll">Standard (Soll): VAT is due when you invoice</option>
-              <option value="ist">Cash basis (Ist): VAT is due when you are paid</option>
+          {text("vat_id", "vatId")}
+          {text("tax_number", "taxNumber")}
+          <Field id="business-vat_method" label={t("vatMethod")}>
+            <select value={form.vat_method} onChange={(event) => change("vat_method", event.target.value)}>
+              <option value="soll">{t("vatSoll")}</option>
+              <option value="ist">{t("vatIst")}</option>
             </select>
-          </label>
+          </Field>
           <label className="check">
-            <input type="checkbox" checked={form.small_business} onChange={(e) => setForm({ ...form, small_business: e.target.checked })} />
-            Small business (Sec. 19 UStG): I don't charge VAT
+            <input type="checkbox" checked={form.small_business} onChange={(event) => change("small_business", event.target.checked)} />
+            {t("smallBusiness")}
           </label>
         </div>
       </section>
       <section className="card">
-        <h2>Limits for the agent</h2>
-        <p className="muted">The AI can never go outside these. They are enforced in code, not in its instructions.</p>
+        <h2>{t("agentLimits")}</h2>
+        <p className="muted">{t("agentLimitsHint")}</p>
         <div className="form-grid">
-          {number("max_installments", "Most payments in a plan", "Between 2 and 12.")}
-          {number("min_first_payment_pct", "Smallest first payment (%)", "Share of the open amount.")}
-          {number("max_plan_days", "Longest plan (days)", "From the first to the last payment.")}
-          {number("min_installment_eur", "Smallest payment (EUR)", "Smaller plans go to you to decide.")}
-          {number("reminder_gap_days", "Days between reminders", "The agent waits at least this long.")}
-          {number("payment_days", "Normal payment time (days)", "Used for the due date on new invoices.")}
+          {number("max_installments", "maxInstallments", "maxInstallmentsHint")}
+          {number("min_first_payment_pct", "minFirst", "minFirstHint")}
+          {number("max_plan_days", "maxPlanDays", "maxPlanDaysHint")}
+          {number("min_installment_eur", "minInstallment", "minInstallmentHint")}
+          {number("reminder_gap_days", "reminderGap", "reminderGapHint")}
+          {number("payment_days", "paymentDays", "paymentDaysHint")}
         </div>
       </section>
-      {error && <div className="alert error">{error}</div>}
-      {message && <div className="alert good">✓ {message}</div>}
-      <div className="button-row">
-        <button className="primary" onClick={save}>
-          Save settings
+      {error && <ErrorBox text={error} />}
+      <div className="action-bar">
+        <span />
+        <button className="primary big" disabled={busy || !dirty} aria-busy={busy}>
+          {t("saveSettings")}
         </button>
       </div>
-    </>
+    </form>
   );
 }

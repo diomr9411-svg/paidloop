@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from paidloop import audit, followup, invoices, messages, policy
 from paidloop.ai import AI
+from paidloop.i18n import LocalizedError, Text
 from paidloop.models import DISPUTED, ISSUED, ON_PLAN, ChatMessage, Installment, Invoice, PaymentPlan, Proposal
 from paidloop.money import eur, eur_de, to_cents
 from paidloop.paypal import PaymentRequest, PayPalError, RequestLine
@@ -95,7 +96,7 @@ class ChatReply:
     offer_id: int | None = None
 
 
-class ChatRefused(Exception):
+class ChatRefused(LocalizedError):
     pass
 
 
@@ -142,11 +143,12 @@ def _language(text: str, invoice: Invoice) -> str:
 def handle_message(session: Session, invoice: Invoice, text: str, ai: AI, paypal) -> ChatReply:
     text = text.strip()
     if not text:
-        raise ChatRefused("Please write a message.")
+        raise ChatRefused(Text("Please write a message.", "Bitte schreiben Sie eine Nachricht."))
     if len(text) > MAX_MESSAGE_CHARS:
-        raise ChatRefused(f"Please keep it under {MAX_MESSAGE_CHARS} characters.")
+        raise ChatRefused(Text(f"Please keep it under {MAX_MESSAGE_CHARS} characters.",
+                               f"Bitte bleiben Sie unter {MAX_MESSAGE_CHARS} Zeichen."))
     if invoice.status not in {ISSUED, ON_PLAN, DISPUTED}:
-        raise ChatRefused("This invoice is closed.")
+        raise ChatRefused(Text("This invoice is closed.", "Diese Rechnung ist abgeschlossen."))
     hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
     recent = session.scalar(
         select(func.count(ChatMessage.id)).where(
@@ -154,7 +156,7 @@ def handle_message(session: Session, invoice: Invoice, text: str, ai: AI, paypal
         )
     )
     if recent >= MAX_MESSAGES_PER_HOUR:
-        raise ChatRefused("Too many messages. Please try again later.")
+        raise ChatRefused(Text("Too many messages. Please try again later.", "Zu viele Nachrichten. Bitte versuchen Sie es später."), status=429)
 
     on = invoices.today(session)
     language = _language(text, invoice)
@@ -194,6 +196,7 @@ def _dispute(session: Session, invoice: Invoice, text: str, language: str, on: d
     if not any(p.status == "pending" and p.action == DISPUTE_REVIEW for p in invoice.proposals):
         session.add(
             Proposal(invoice=invoice, action=DISPUTE_REVIEW, reason="The customer says something is wrong. Reminders are paused until you decide.",
+                     reason_de="Der Kunde meldet ein Problem. Die Erinnerungen pausieren, bis Sie entscheiden.",
                      subject="Customer raised a problem", body=text,
                      payload=json.dumps({"english": ""}))
         )
@@ -219,6 +222,7 @@ def _already_paid(session: Session, invoice: Invoice, text: str, language: str, 
         if not any(p.status == "pending" and p.action == PAYMENT_CHECK for p in invoice.proposals):
             session.add(
                 Proposal(invoice=invoice, action=PAYMENT_CHECK, reason="The customer says they paid, but PayPal shows no payment.",
+                         reason_de="Der Kunde sagt, er habe bezahlt, aber PayPal zeigt keine Zahlung.",
                          subject="Please check this payment", body=text, payload=json.dumps({"english": ""}))
             )
         return messages.chat("paid_not_found_again", language)
@@ -232,6 +236,7 @@ def _ask_owner(session: Session, invoice: Invoice, text: str, count: int | None 
         return
     session.add(
         Proposal(invoice=invoice, action=PLAN_EXCEPTION, reason="The customer asks for something only you can decide.",
+                 reason_de="Der Kunde bittet um etwas, das nur Sie entscheiden können.",
                  subject="Customer asks for your decision", body=text,
                  payload=json.dumps({"english": "", "count": count, "first_cents": first}))
     )
@@ -300,9 +305,9 @@ def accept_offer(session: Session, invoice: Invoice, plan_id: int, paypal) -> Ch
     """The customer clicked accept. Only now does anything change at PayPal."""
     plan = session.get(PaymentPlan, plan_id)
     if plan is None or plan.invoice_id != invoice.id or plan.status != "offered":
-        raise ChatRefused("This offer is no longer available.")
+        raise ChatRefused(Text("This offer is no longer available.", "Dieses Angebot ist nicht mehr verfügbar."))
     if invoice.status not in {ISSUED, DISPUTED}:
-        raise ChatRefused("This invoice can't take a plan right now.")
+        raise ChatRefused(Text("This invoice can't take a plan right now.", "Für diese Rechnung ist gerade kein Plan möglich."))
     on = invoices.today(session)
     business = invoices.business_of(session)
     limits = followup.limits_of(business)
@@ -310,16 +315,18 @@ def accept_offer(session: Session, invoice: Invoice, plan_id: int, paypal) -> Ch
 
     invoices.sync(session, invoice, paypal)  # the customer may have paid while the offer was open
     if invoice.status not in {ISSUED, DISPUTED}:
-        raise ChatRefused("This invoice is already paid. Thank you!")
+        raise ChatRefused(Text("This invoice is already paid. Thank you!", "Diese Rechnung ist schon bezahlt. Vielen Dank!"))
     if sum(p.amount_cents for p in payments) != invoice.open_cents:
         plan.status = "declined"
-        raise ChatRefused("The open amount has changed. Please ask for a new offer.")
+        raise ChatRefused(Text("The open amount has changed. Please ask for a new offer.",
+                               "Der offene Betrag hat sich geändert. Bitte fragen Sie nach einem neuen Angebot."))
     if plan.created_by == "agent":
         problems = policy.plan_problems(invoice.open_cents, payments, on, limits)
         if problems:
             plan.status = "declined"
             audit.record(session, "rules", "plan_refused", invoice.id, problems=problems)
-            raise ChatRefused("This offer is no longer available. Please ask for a new one.")
+            raise ChatRefused(Text("This offer is no longer available. Please ask for a new one.",
+                                   "Dieses Angebot ist nicht mehr verfügbar. Bitte fragen Sie nach einem neuen."))
 
     created: list[str] = []
     try:
@@ -330,11 +337,16 @@ def accept_offer(session: Session, invoice: Invoice, plan_id: int, paypal) -> Ch
                 number=number,
                 issue_date=date.today(),
                 due_date=max(installment.due_date, date.today()),
-                note=f"Rate {installment.seq} von {len(plan.installments)} zu Rechnung {invoice.number}. "
+                note=f"Payment {installment.seq} of {len(plan.installments)} for invoice {invoice.number}. "
+                f"This is not a new invoice, but an agreed part payment."
+                if invoice.customer.language == "en"
+                else f"Rate {installment.seq} von {len(plan.installments)} zu Rechnung {invoice.number}. "
                 f"Dies ist keine neue Rechnung, sondern eine vereinbarte Teilzahlung.",
                 recipient_name=invoice.customer.name,
                 recipient_email=invoice.customer.email,
-                lines=(RequestLine(name=f"Rate {installment.seq}/{len(plan.installments)} zu {invoice.number}",
+                lines=(RequestLine(name=(f"Payment {installment.seq}/{len(plan.installments)} for {invoice.number}"
+                                         if invoice.customer.language == "en"
+                                         else f"Rate {installment.seq}/{len(plan.installments)} zu {invoice.number}"),
                                    quantity="1", unit_price_cents=installment.amount_cents),),
                 invoicer_name=business.name,
             )
@@ -361,7 +373,8 @@ def accept_offer(session: Session, invoice: Invoice, plan_id: int, paypal) -> Ch
         for installment in plan.installments:
             installment.paypal_id = installment.paypal_number = installment.pay_link = None
         audit.record(session, "paypal", "plan_failed", invoice.id, error=str(error)[:200])
-        raise ChatRefused("PayPal could not set up the plan just now. Please try again in a moment.") from error
+        raise ChatRefused(Text("PayPal could not set up the plan just now. Please try again in a moment.",
+                               "PayPal konnte den Plan gerade nicht einrichten. Bitte versuchen Sie es gleich noch einmal.")) from error
 
     plan.status = "active"
     if invoice.status == DISPUTED:

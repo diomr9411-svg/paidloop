@@ -12,16 +12,17 @@ from datetime import date, datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import Integer, cast, func, select
 from sqlalchemy.orm import Session
 
 from paidloop import audit, invoices, legal, messages, policy, risk
 from paidloop.ai import AI
-from paidloop.compliance import CONSUMER_NOTICE_DE
+from paidloop.i18n import Text
 from paidloop.models import DISPUTED, ISSUED, ON_PLAN, Business, Invoice, Proposal
 from paidloop.paypal import PayPalError
 
 AI_TIMEOUT_SECONDS = 90
+ALREADY_DECIDED = Text("This step was already decided.", "Dieser Schritt wurde schon entschieden.")
 LEVEL_AFTER = {policy.FRIENDLY: 1, policy.FIRM: 2, policy.FINAL: 3, policy.OWNER_REVIEW: 4}
 
 
@@ -51,12 +52,26 @@ def limits_of(business: Business) -> policy.Limits:
     )
 
 
-def risk_of(session: Session, invoice: Invoice, on: date) -> risk.Risk:
+def customer_stats(session: Session, customer_id: int | None = None) -> dict[int, tuple[int, int]]:
+    """Per customer: (invoices paid here, total days late). One indexed query, not one per invoice."""
+    late = func.max(0, cast(func.julianday(Invoice.paid_on) - func.julianday(Invoice.due_date), Integer))
+    query = (
+        select(Invoice.customer_id, func.count(Invoice.id), func.coalesce(func.sum(late), 0))
+        .where(Invoice.paid_on.is_not(None), Invoice.due_date.is_not(None), Invoice.customer_id.is_not(None))
+        .group_by(Invoice.customer_id)
+    )
+    if customer_id is not None:
+        query = query.where(Invoice.customer_id == customer_id)
+    return {row[0]: (row[1], int(row[2])) for row in session.execute(query)}
+
+
+def risk_of(session: Session, invoice: Invoice, on: date, stats: dict[int, tuple[int, int]] | None = None) -> risk.Risk:
     customer = invoice.customer
-    paid_here = [i for i in customer.invoices if i.paid_on and i.due_date and i.id != invoice.id]
-    late_here = [max((i.paid_on - i.due_date).days, 0) for i in paid_here]
-    paid_count = customer.history_paid_count + len(paid_here)
-    total_late = customer.history_avg_days_late * customer.history_paid_count + sum(late_here)
+    if stats is None:
+        stats = customer_stats(session, customer.id)
+    paid_here, late_here = stats.get(customer.id, (0, 0))
+    paid_count = customer.history_paid_count + paid_here
+    total_late = customer.history_avg_days_late * customer.history_paid_count + late_here
     return risk.assess(
         risk.RiskInput(
             paid_count=paid_count,
@@ -131,13 +146,13 @@ class Outcome:
     invoice_id: int
     number: str
     action: str
-    reason: str
+    reason: Text
     decided_by: str  # ai or rules
     status: str  # done, waiting_for_owner, nothing, failed
 
 
 def _choose(invoice: Invoice, facts: policy.FollowupFacts, limits: policy.Limits, assessed: risk.Risk, ai: AI,
-            session: Session) -> tuple[str, str, str, str]:
+            session: Session) -> tuple[str, Text, str, str]:
     options = policy.allowed_actions(facts, limits)
     rule_action, rule_reason = policy.rule_choice(facts, limits)
     if len(options) == 1:
@@ -149,7 +164,7 @@ def _choose(invoice: Invoice, facts: policy.FollowupFacts, limits: policy.Limits
         "customer_language": invoice.customer.language,
         "reminders_so_far": facts.reminder_level,
         "risk_level": assessed.level,
-        "risk_reasons": list(assessed.reasons),
+        "risk_reasons": [str(reason) for reason in assessed.reasons],
         "allowed_actions": options,
     }
     answer = ai.ask_json(SYSTEM_PROMPT, json.dumps(data, ensure_ascii=False), AgentChoice, timeout=AI_TIMEOUT_SECONDS)
@@ -158,15 +173,20 @@ def _choose(invoice: Invoice, facts: policy.FollowupFacts, limits: policy.Limits
     verdict = policy.gate(answer.action, facts, limits)
     if verdict.allowed and answer.action == policy.WAIT and rule_action != policy.WAIT and assessed.level != "low":
         # Waiting forever is also a risk: only a reliable customer can be given extra time by the AI.
-        verdict = policy.GateResult(False, False, "The AI wanted to wait, but this customer's risk is not low.")
+        verdict = policy.GateResult(False, False, Text("The AI wanted to wait, but this customer's risk is not low.",
+                                                       "Die KI wollte warten, aber das Risiko dieses Kunden ist nicht niedrig."))
     if not verdict.allowed:
         audit.record(session, "rules", "ai_choice_refused", invoice.id, proposed=answer.action, why=verdict.reason)
-        return rule_action, f"The AI's choice was refused, so the rules decided. {rule_reason}", "rules", answer.friendly_sentence
+        refused = Text(f"The AI's choice was refused, so the rules decided. {rule_reason}",
+                       f"Der Vorschlag der KI wurde abgelehnt, daher entschieden die Regeln. {rule_reason.de}")
+        return rule_action, refused, "rules", answer.friendly_sentence
     reason = " ".join(answer.reason.split())[:300]
     if not reason or messages.looks_german(reason) or not messages.LATIN_ONLY.match(re.sub(r"[0-9%€]", "", reason)):
         # A step with no usable reason can't be explained to the owner, so the rules decide instead.
         return rule_action, rule_reason, "rules", answer.friendly_sentence
-    return answer.action, reason, "ai", answer.friendly_sentence
+    # The small model writes good English reasons. German readers get the fixed text for the same step.
+    german = rule_reason.de if answer.action == rule_action else policy.reason_for(answer.action, facts).de
+    return answer.action, Text(reason, german), "ai", answer.friendly_sentence
 
 
 def run(session: Session, paypal, ai: AI, public_base: str) -> list[Outcome]:
@@ -182,10 +202,12 @@ def run(session: Session, paypal, ai: AI, public_base: str) -> list[Outcome]:
             pass  # a stale view is safe here: a later run picks up the payment, and reminders are spaced out
         session.commit()  # the AI can take a minute, and other screens must keep working meanwhile
         if invoice.status not in {ISSUED, ON_PLAN, DISPUTED}:
-            outcomes.append(Outcome(invoice.id, invoice.number, policy.WAIT, "The invoice has just been paid.", "rules", "nothing"))
+            outcomes.append(Outcome(invoice.id, invoice.number, policy.WAIT,
+                                    Text("The invoice has just been paid.", "Die Rechnung wurde gerade bezahlt."), "rules", "nothing"))
             continue
         if any(p.status == "pending" for p in invoice.proposals):
-            outcomes.append(Outcome(invoice.id, invoice.number, policy.WAIT, "A step is already waiting for your approval.", "rules", "nothing"))
+            outcomes.append(Outcome(invoice.id, invoice.number, policy.WAIT,
+                                    Text("A step is already waiting for your approval.", "Ein Schritt wartet bereits auf Ihre Freigabe."), "rules", "nothing"))
             continue
 
         assessed = risk_of(session, invoice, on)
@@ -199,11 +221,11 @@ def run(session: Session, paypal, ai: AI, public_base: str) -> list[Outcome]:
         text = _message(invoice, business, action, on, public_base, sentence)
         if verdict.needs_owner:
             session.add(
-                Proposal(invoice=invoice, action=action, reason=reason, decided_by_ai=decided_by == "ai",
+                Proposal(invoice=invoice, action=action, reason=str(reason), reason_de=reason.de, decided_by_ai=decided_by == "ai",
                          subject=text.subject, body=text.body,
-                         payload=json.dumps({"english": text.english_for_owner}, ensure_ascii=False))
+                         payload=json.dumps({"english": text.english_for_owner, "german": text.german_for_owner}, ensure_ascii=False))
             )
-            audit.record(session, decided_by, "proposed", invoice.id, action=action, reason=reason)
+            audit.record(session, decided_by, "proposed", invoice.id, action=action, reason=str(reason), reason_de=reason.de)
             session.commit()
             outcomes.append(Outcome(invoice.id, invoice.number, action, reason, decided_by, "waiting_for_owner"))
             continue
@@ -213,14 +235,15 @@ def run(session: Session, paypal, ai: AI, public_base: str) -> list[Outcome]:
         except PayPalError as error:
             audit.record(session, "paypal", "reminder_failed", invoice.id, action=action, error=str(error)[:200])
             session.commit()
-            outcomes.append(Outcome(invoice.id, invoice.number, action, f"PayPal did not accept it: {error}", decided_by, "failed"))
+            outcomes.append(Outcome(invoice.id, invoice.number, action,
+                                    Text(f"PayPal did not accept it: {error}", f"PayPal hat es nicht angenommen: {error}"), decided_by, "failed"))
             continue
         session.commit()
         outcomes.append(Outcome(invoice.id, invoice.number, action, reason, decided_by, "done"))
     return outcomes
 
 
-def _send(session: Session, invoice: Invoice, paypal, action: str, subject: str, body: str, on: date, actor: str, reason: str) -> None:
+def _send(session: Session, invoice: Invoice, paypal, action: str, subject: str, body: str, on: date, actor: str, reason: Text) -> None:
     target = target_paypal_id(invoice)
     if action != policy.OWNER_REVIEW and target:
         paypal.remind(target, subject, body)
@@ -230,15 +253,15 @@ def _send(session: Session, invoice: Invoice, paypal, action: str, subject: str,
     if action == policy.FIRM and invoice.default_since is None:
         invoice.default_since = on  # a clear reminder after the due date starts default (Sec. 286(1) BGB)
     audit.record(session, actor, "reminder_sent" if action != policy.OWNER_REVIEW else "owner_review_done",
-                 invoice.id, action=action, reason=reason, subject=subject)
+                 invoice.id, action=action, reason=str(reason), reason_de=reason.de, subject=subject)
 
 
-def approve(session: Session, proposal: Proposal, paypal, edited_body: str | None = None) -> str:
+def approve(session: Session, proposal: Proposal, paypal, edited_body: str | None = None) -> Text:
     """The owner says yes. Everything is checked again, because things may have changed since the proposal."""
     from paidloop import negotiation
 
     if proposal.status != "pending":
-        return "This step was already decided."
+        return ALREADY_DECIDED
     invoice = proposal.invoice
     business = invoices.business_of(session)
     on = invoices.today(session)
@@ -249,15 +272,16 @@ def approve(session: Session, proposal: Proposal, paypal, edited_body: str | Non
         proposal.status = "done"
         audit.record(session, "owner", "approved", invoice.id, action=proposal.action, offered=offered)
         if offered:
-            return "The plan is now offered to the customer."
-        return "No new plan was offered, because this invoice already has a plan or nothing is open. Please contact the customer directly."
+            return Text("The plan is now offered to the customer.", "Der Plan wird dem Kunden jetzt angeboten.")
+        return Text("No new plan was offered, because this invoice already has a plan or nothing is open. Please contact the customer directly.",
+                    "Es wurde kein neuer Plan angeboten, weil diese Rechnung schon einen Plan hat oder nichts offen ist. Bitte kontaktieren Sie den Kunden direkt.")
     if proposal.action in {negotiation.DISPUTE_REVIEW, negotiation.PAYMENT_CHECK}:
         if invoice.status == DISPUTED:
             invoices.resume_after_dispute(session, invoice)
         invoice.paused_until = None
         proposal.status = "done"
         audit.record(session, "owner", "approved", invoice.id, action=proposal.action)
-        return "Reminders continue as normal."
+        return Text("Reminders continue as normal.", "Die Erinnerungen laufen normal weiter.")
 
     try:
         invoices.sync(session, invoice, paypal)
@@ -265,7 +289,8 @@ def approve(session: Session, proposal: Proposal, paypal, edited_body: str | Non
         pass
     if invoice.status not in {ISSUED, ON_PLAN}:
         proposal.status = "obsolete"
-        return "No reminder was sent, because the invoice is no longer open or is on hold."
+        return Text("No reminder was sent, because the invoice is no longer open or is on hold.",
+                    "Es wurde keine Erinnerung gesendet, weil die Rechnung nicht mehr offen ist oder pausiert.")
 
     assessed = risk_of(session, invoice, on)
     facts = facts_of(session, invoice, on, assessed.level)
@@ -273,26 +298,23 @@ def approve(session: Session, proposal: Proposal, paypal, edited_body: str | Non
     if not verdict.allowed:
         proposal.status = "obsolete"
         audit.record(session, "rules", "approval_refused", invoice.id, action=proposal.action, why=verdict.reason)
-        return f"Not sent: {verdict.reason}"
+        return Text(f"Not sent: {verdict.reason}", f"Nicht gesendet: {verdict.reason.de}")
 
     body = (edited_body or proposal.body).strip()
-    _send(session, invoice, paypal, proposal.action, proposal.subject, body, on, "owner", proposal.reason)
+    _send(session, invoice, paypal, proposal.action, proposal.subject, body, on, "owner", Text(proposal.reason, proposal.reason_de or proposal.reason))
     proposal.body = body
     proposal.status = "done"
     audit.record(session, "owner", "approved", invoice.id, action=proposal.action, edited=edited_body is not None)
-    return "Sent."
+    return Text("Sent.", "Gesendet.")
 
 
-def reject(session: Session, proposal: Proposal) -> str:
+def reject(session: Session, proposal: Proposal) -> Text:
     if proposal.status != "pending":
-        return "This step was already decided."
+        return ALREADY_DECIDED
     proposal.status = "rejected"
     proposal.decided_at = datetime.now(timezone.utc)
     invoice = proposal.invoice
     # Respect the owner's no: do not propose the same step again until the normal gap has passed.
     invoice.last_reminder_on = invoices.today(session)
     audit.record(session, "owner", "rejected", invoice.id, action=proposal.action)
-    return "OK, nothing was sent."
-
-
-NOTICE_USED = CONSUMER_NOTICE_DE
+    return Text("OK, nothing was sent.", "OK, es wurde nichts gesendet.")

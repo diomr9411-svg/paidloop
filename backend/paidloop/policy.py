@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from paidloop.i18n import Text
+
 WAIT = "wait"
 PRE_DUE = "pre_due_note"
 FRIENDLY = "friendly_reminder"
@@ -72,39 +74,56 @@ def allowed_actions(facts: FollowupFacts, limits: Limits) -> list[str]:
 class GateResult:
     allowed: bool
     needs_owner: bool
-    reason: str
+    reason: Text
 
 
 def gate(action: str, facts: FollowupFacts, limits: Limits) -> GateResult:
     """Every action passes here before it runs, whether it came from the AI or from rules."""
     if action not in allowed_actions(facts, limits):
-        return GateResult(False, False, f"'{action}' is not allowed for this invoice right now.")
-    return GateResult(True, action in SERIOUS_ACTIONS, "Allowed by the owner's limits.")
+        return GateResult(False, False, Text(f"'{action}' is not allowed for this invoice right now.",
+                                             f"'{action}' ist für diese Rechnung gerade nicht erlaubt."))
+    return GateResult(True, action in SERIOUS_ACTIONS, Text("Allowed by the owner's limits.", "Im Rahmen Ihrer Grenzen erlaubt."))
 
 
-def rule_choice(facts: FollowupFacts, limits: Limits) -> tuple[str, str]:
+def reason_for(action: str, facts: FollowupFacts) -> Text:
+    """A plain explanation of a step in both languages, whoever chose it."""
+    days = facts.days_overdue
+    if action == PRE_DUE:
+        return Text("This customer often pays late, so a short note before the due date can help.",
+                    "Dieser Kunde zahlt oft spät, deshalb hilft eine kurze Nachricht vor der Fälligkeit.")
+    if action == FRIENDLY:
+        return Text(f"The invoice is {days} days late and no reminder was sent yet.",
+                    f"Die Rechnung ist {days} Tage überfällig, und es wurde noch nicht erinnert.")
+    if action == FIRM:
+        return Text(f"The invoice is {days} days late, and the friendly reminder did not work.",
+                    f"Die Rechnung ist {days} Tage überfällig, die freundliche Erinnerung hat nicht gewirkt.")
+    if action == FINAL:
+        return Text(f"The invoice is {days} days late, even after a firm reminder.",
+                    f"Die Rechnung ist {days} Tage überfällig, trotz Mahnung.")
+    if action == OWNER_REVIEW:
+        return Text(f"The invoice is {days} days late, even after a final notice. You should decide the next step.",
+                    f"Die Rechnung ist {days} Tage überfällig, trotz letzter Mahnung. Bitte entscheiden Sie den nächsten Schritt.")
+    return Text("No step is due yet.", "Noch kein Schritt fällig.")
+
+
+def rule_choice(facts: FollowupFacts, limits: Limits) -> tuple[str, Text]:
     """What the rules do when no AI is available, and the safe default when the AI's answer is refused."""
     options = allowed_actions(facts, limits)
     if len(options) == 1:
         if facts.paused:
-            return WAIT, "Reminders are paused for this invoice."
+            return WAIT, Text("Reminders are paused for this invoice.", "Die Erinnerungen für diese Rechnung sind pausiert.")
         if facts.disputed:
-            return WAIT, "The customer has raised a problem. The owner must look first."
-        return WAIT, "No step is due yet."
+            return WAIT, Text("The customer has raised a problem. The owner must look first.",
+                              "Der Kunde hat ein Problem gemeldet. Sie müssen zuerst prüfen.")
+        return WAIT, reason_for(WAIT, facts)
     action = options[-1]
-    if action == PRE_DUE:
-        if facts.risk_level == "high":
-            return PRE_DUE, "This customer often pays late, so a short note before the due date can help."
-        return WAIT, "This customer usually pays on time, so no note is needed before the due date."
-    if action == FRIENDLY:
-        if facts.risk_level == "low" and facts.days_overdue < 4:
-            return WAIT, "This customer pays reliably and is only a few days late. Most such payments arrive within a week."
-        return FRIENDLY, f"The invoice is {facts.days_overdue} days late and no reminder was sent yet."
-    if action == FIRM:
-        return FIRM, f"The invoice is {facts.days_overdue} days late, and the friendly reminder did not work."
-    if action == FINAL:
-        return FINAL, f"The invoice is {facts.days_overdue} days late, even after a firm reminder."
-    return OWNER_REVIEW, f"The invoice is {facts.days_overdue} days late, even after a final notice. You should decide the next step."
+    if action == PRE_DUE and facts.risk_level != "high":
+        return WAIT, Text("This customer usually pays on time, so no note is needed before the due date.",
+                          "Dieser Kunde zahlt meist pünktlich, daher ist vor der Fälligkeit keine Nachricht nötig.")
+    if action == FRIENDLY and facts.risk_level == "low" and facts.days_overdue < 4:
+        return WAIT, Text("This customer pays reliably and is only a few days late. Most such payments arrive within a week.",
+                          "Dieser Kunde zahlt zuverlässig und ist nur wenige Tage spät. Solche Zahlungen kommen meist innerhalb einer Woche.")
+    return action, reason_for(action, facts)
 
 
 # Payment plans

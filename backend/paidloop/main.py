@@ -6,30 +6,33 @@ import json
 import logging
 import threading
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Query, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy.orm import Session, selectinload
 
-from paidloop import audit, capture, dashboard, demo, followup, invoices, ledger, legal, negotiation
+from paidloop import audit, capture, compliance, dashboard, demo, followup, invoices, ledger, legal, negotiation
 from paidloop.ai import AI, LocalAI, NoAI
-from paidloop.db import Base, make_engine, make_session_factory
-from paidloop.invoices import InvoiceError, LineInput
+from paidloop.db import make_engine, make_session_factory, prepare
+from paidloop.i18n import LocalizedError, Text, language_from_header, pick
+from paidloop.invoices import LineInput
 from paidloop.models import (
-    ALLOWED_TRANSITIONS,
     AuditEvent,
     Business,
     Customer,
     InvalidTransition,
     Invoice,
     Installment,
+    PaymentPlan,
     Proposal,
     WebhookEvent,
+    name_key,
 )
 from paidloop.money import to_cents
 from paidloop.negotiation import ChatRefused
@@ -115,6 +118,14 @@ class CancelIn(BaseModel):
     reason: str = Field(default="", max_length=200)
 
 
+class IssueIn(BaseModel):
+    seconds_to_issue: int | None = Field(default=None, ge=0, le=7 * 24 * 3600)
+
+
+LIST_FILTERS = {"all", "open", "overdue", "on_plan", "disputed", "draft", "paid", "cancelled"}
+NOT_FOUND = Text("Not found.", "Nicht gefunden.")
+
+
 # Turning records into JSON
 
 
@@ -165,7 +176,7 @@ def plan_json(plan) -> dict | None:
     }
 
 
-def invoice_summary(session: Session, invoice: Invoice, on: date) -> dict:
+def invoice_summary(session: Session, invoice: Invoice, on: date, pending_ids: set[int] | None = None) -> dict:
     return {
         "id": invoice.id,
         "number": invoice.number,
@@ -179,11 +190,11 @@ def invoice_summary(session: Session, invoice: Invoice, on: date) -> dict:
         "days_overdue": invoices.days_overdue(invoice, on) if invoice.due_date else 0,
         "reminder_level": invoice.reminder_level,
         "paused_until": invoice.paused_until,
-        "has_pending": any(p.status == "pending" for p in invoice.proposals),
+        "has_pending": invoice.id in pending_ids if pending_ids is not None else any(p.status == "pending" for p in invoice.proposals),
     }
 
 
-def invoice_detail(session: Session, invoice: Invoice) -> dict:
+def invoice_detail(session: Session, invoice: Invoice, language: str = "en") -> dict:
     on = invoices.today(session)
     data = invoice_summary(session, invoice, on)
     data.update(
@@ -206,7 +217,7 @@ def invoice_detail(session: Session, invoice: Invoice) -> dict:
     )
     if invoice.number and invoice.customer:
         assessed = followup.risk_of(session, invoice, on)
-        data["risk"] = {"score": assessed.score, "level": assessed.level, "reasons": list(assessed.reasons),
+        data["risk"] = {"score": assessed.score, "level": assessed.level, "reasons": [pick(reason, language) for reason in assessed.reasons],
                         "expected_days_late": assessed.expected_days_late}
         costs = followup.late_costs_of(invoice, on)
         data["late_costs"] = {
@@ -220,46 +231,67 @@ def invoice_detail(session: Session, invoice: Invoice) -> dict:
     return data
 
 
-def proposal_json(session: Session, proposal: Proposal, on: date) -> dict:
+def proposal_json(session: Session, proposal: Proposal, on: date, language: str = "en") -> dict:
     payload = json.loads(proposal.payload or "{}")
     return {
         "id": proposal.id,
         "action": proposal.action,
-        "reason": proposal.reason,
+        "reason": (proposal.reason_de or proposal.reason) if language == "de" else proposal.reason,
         "decided_by_ai": proposal.decided_by_ai,
         "subject": proposal.subject,
         "body": proposal.body,
         "english": payload.get("english", ""),
+        "german": payload.get("german", ""),
         "status": proposal.status,
         "created_at": proposal.created_at,
         "invoice": invoice_summary(session, proposal.invoice, on),
     }
 
 
-def check_json(result) -> dict:
+def check_json(result, language: str = "en") -> dict:
     return {
         "can_issue": result.can_issue,
-        "issues": [vars(issue) if hasattr(issue, "__dict__") else issue.__dict__ for issue in result.issues],
+        "issues": [
+            {
+                "rule_id": issue.rule_id,
+                "severity": issue.severity,
+                "field": issue.field,
+                "law": compliance.law_in_german(issue.law) if language == "de" else issue.law,
+                "message": pick(issue.message, language),
+                "fix": pick(issue.fix, language),
+            }
+            for issue in result.issues
+        ],
         "notes_to_print": result.notes_to_print,
     }
 
 
+def find_customer(session: Session, name: str) -> Customer | None:
+    """Same name first, using the index. Then a customer whose name has every word."""
+    key = name_key(name)
+    if not key:
+        return None
+    exact = session.scalar(select(Customer).where(Customer.name_key == key).order_by(Customer.id).limit(1))
+    if exact:
+        return exact
+    query = select(Customer).order_by(Customer.name_key).limit(1)
+    for word in key.split():
+        query = query.where(Customer.name_key.contains(word, autoescape=True))
+    return session.scalar(query)
+
+
 def capture_json(session: Session, result: capture.CaptureResult) -> dict:
     extracted = result.extracted
-    known = None
-    if extracted.customer_name:
-        words = extracted.customer_name.lower().split()
-        for customer in session.scalars(select(Customer)):
-            if all(word in customer.name.lower() for word in words):
-                known = customer_json(customer)
-                break
+    found = find_customer(session, extracted.customer_name) if extracted.customer_name else None
+    known = customer_json(found)
     business = invoices.business_of(session)
     return {
         "source": result.source,
         "source_text": result.source_text,
         "extracted": extracted.model_dump(),
         "unsure": result.unsure,
-        "warnings": result.warnings,
+        # Both languages, because reading a note again would run the AI again.
+        "warnings": [{"en": str(warning), "de": pick(warning, "de")} for warning in result.warnings],
         "property_work": result.property_work,
         "known_customer": known,
         "today": invoices.today(session),
@@ -301,19 +333,28 @@ def build_ai(settings: Settings) -> AI:
                    REPO_ROOT / "data" / "ai_answers.json", cpu_only=settings.ai_cpu_only)
 
 
+def language_of(request: Request) -> str:
+    return language_from_header(request.headers.get("x-language") or request.headers.get("accept-language"))
+
+
 def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = None) -> FastAPI:
     settings = settings or get_settings()
     engine = make_engine(settings.database_url)
-    Base.metadata.create_all(engine)
+    prepare(engine)
     sessions = make_session_factory(engine)
     paypal = paypal if paypal is not None else build_paypal(settings)
     ai = ai if ai is not None else build_ai(settings)
     public_base = settings.public_base_url.rstrip("/")
     stop_sync = threading.Event()
+    sync_state: dict[str, str | None] = {"last_ok_at": None, "last_error": None}
+
+    def now_text() -> str:
+        return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     def sync_loop() -> None:
         """Payment updates work without a public webhook address, because the app asks PayPal itself."""
         while not stop_sync.wait(settings.sync_interval_seconds):
+            problem = None
             try:
                 with sessions() as session:
                     ids = list(session.scalars(select(Invoice.id).where(Invoice.status.in_(["issued", "on_plan", "disputed"]))))
@@ -323,10 +364,18 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
                         try:
                             invoices.sync(session, invoice, paypal)
                             session.commit()
-                        except PayPalError:
+                        except PayPalError as error:
                             session.rollback()
-            except Exception:  # keep the loop alive; the next round tries again
+                            problem = str(error)[:200]
+            except Exception as error:  # keep the loop alive; the next round tries again
                 log.exception("Payment sync failed")
+                problem = type(error).__name__
+            # The owner sees this as a status light, so a silent failure can't pass unnoticed.
+            if problem:
+                sync_state["last_error"] = problem
+            else:
+                sync_state["last_ok_at"] = now_text()
+                sync_state["last_error"] = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -349,21 +398,26 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
         response.headers["X-Frame-Options"] = "DENY"
         return response
 
-    @app.exception_handler(InvoiceError)
-    async def _invoice_error(_request, error):
-        return JSONResponse(status_code=422, content={"detail": str(error)})
+    @app.exception_handler(LocalizedError)
+    async def _localized_error(request, error):
+        return JSONResponse(status_code=error.status, content={"detail": error.message(language_of(request))})
 
     @app.exception_handler(InvalidTransition)
-    async def _transition_error(_request, error):
-        return JSONResponse(status_code=409, content={"detail": str(error)})
-
-    @app.exception_handler(ChatRefused)
-    async def _chat_error(_request, error):
-        return JSONResponse(status_code=422, content={"detail": str(error)})
+    async def _transition_error(request, _error):
+        text = Text("This step is not possible in the invoice's current state. Please reload the page.",
+                    "Dieser Schritt ist im aktuellen Status der Rechnung nicht möglich. Bitte laden Sie die Seite neu.")
+        return JSONResponse(status_code=409, content={"detail": text.get(language_of(request))})
 
     @app.exception_handler(PayPalError)
-    async def _paypal_error(_request, error):
-        return JSONResponse(status_code=502, content={"detail": f"PayPal problem: {error}"})
+    async def _paypal_error(request, error):
+        text = Text(f"PayPal problem: {error}", f"PayPal-Problem: {error}")
+        return JSONResponse(status_code=502, content={"detail": text.get(language_of(request))})
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(request, error):
+        text = Text("Please check the values you entered.", "Bitte prüfen Sie Ihre Eingaben.")
+        fields = [".".join(str(part) for part in item["loc"][1:]) for item in error.errors()]
+        return JSONResponse(status_code=422, content={"detail": text.get(language_of(request)), "fields": fields})
 
     def get_session() -> Iterator[Session]:
         with sessions() as session:
@@ -377,18 +431,20 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
     def invoice_or_404(session: Session, invoice_id: int) -> Invoice:
         invoice = session.get(Invoice, invoice_id)
         if invoice is None:
-            raise HTTPException(404, "Invoice not found")
+            raise LocalizedError(Text("Invoice not found.", "Rechnung nicht gefunden."), 404)
         return invoice
 
     def by_token(session: Session, token: str) -> Invoice:
         invoice = session.scalar(select(Invoice).where(Invoice.public_token == token)) if len(token) >= 20 else None
         if invoice is None:
-            raise HTTPException(404, "This link is not valid.")
+            raise LocalizedError(Text("This link is not valid.", "Dieser Link ist nicht gültig."), 404)
         return invoice
 
     @app.get("/api/health")
-    def health() -> dict:
+    def health(session: Session = Depends(get_session, scope="function")) -> dict:
         return {
+            "pending_approvals": session.scalar(select(func.count(Proposal.id)).where(Proposal.status == "pending")),
+            "sync": {**sync_state, "interval_seconds": settings.sync_interval_seconds},
             "status": "ok",
             "paypal_mode": "simulated" if getattr(paypal, "simulated", False) else "sandbox",
             "paypal_keys_set": settings.has_paypal_keys,
@@ -413,11 +469,25 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
         return business_json(business)
 
     @app.get("/api/customers")
-    def list_customers(session: Session = Depends(get_session, scope="function")) -> list[dict]:
-        return [customer_json(c) for c in session.scalars(select(Customer).order_by(Customer.name))]
+    def list_customers(
+        q: str = Query(default="", max_length=100),
+        limit: int = Query(default=200, ge=1, le=500),
+        session: Session = Depends(get_session, scope="function"),
+    ) -> list[dict]:
+        query = select(Customer).order_by(Customer.name_key).limit(limit)
+        if q.strip():
+            query = query.where(Customer.name_key.contains(name_key(q), autoescape=True))
+        return [customer_json(c) for c in session.scalars(query)]
 
     @app.post("/api/customers")
     def add_customer(data: CustomerIn, session: Session = Depends(get_session, scope="function")) -> dict:
+        """Typing a known customer again updates them, so the same firm doesn't end up in the list twice."""
+        for existing in session.scalars(select(Customer).where(Customer.name_key == name_key(data.name)).order_by(Customer.id)):
+            if not existing.email or not data.email or existing.email.casefold() == data.email.casefold():
+                for key, value in data.model_dump().items():
+                    if value != "":
+                        setattr(existing, key, value)
+                return customer_json(existing)
         customer = Customer(**data.model_dump())
         session.add(customer)
         session.flush()
@@ -427,7 +497,7 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
     def edit_customer(customer_id: int, data: CustomerIn, session: Session = Depends(get_session, scope="function")) -> dict:
         customer = session.get(Customer, customer_id)
         if customer is None:
-            raise HTTPException(404, "Customer not found")
+            raise LocalizedError(Text("Customer not found.", "Kunde nicht gefunden."), 404)
         for key, value in data.model_dump().items():
             setattr(customer, key, value)
         return customer_json(customer)
@@ -441,11 +511,7 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
     @app.post("/api/capture/file")
     def capture_from_file(file: UploadFile = File(...), session: Session = Depends(get_session, scope="function")) -> dict:
         content = file.file.read(capture.MAX_FILE_BYTES + 1)
-        try:
-            text = capture.text_from_file(content, file.filename or "")
-        except capture.UnreadableFile as error:
-            raise HTTPException(422, str(error)) from error
-        return capture_json(session, capture.capture_text(text, ai))
+        return capture_json(session, capture.capture_text(capture.text_from_file(content, file.filename or ""), ai))
 
     # Invoices
 
@@ -455,70 +521,154 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
             for l in lines
         ]
 
+    def overdue_condition(on: date):
+        late_plan_payment = exists().where(
+            PaymentPlan.invoice_id == Invoice.id,
+            PaymentPlan.status == "active",
+            Installment.plan_id == PaymentPlan.id,
+            Installment.paid_cents < Installment.amount_cents,
+            Installment.due_date < on,
+        )
+        return or_(
+            and_(Invoice.status.in_(["issued", "disputed"]), Invoice.due_date < on),
+            and_(Invoice.status == "on_plan", late_plan_payment),
+        )
+
+    def filter_condition(name: str, on: date):
+        if name == "open":
+            return Invoice.status.in_(["issued", "on_plan", "disputed"])
+        if name == "overdue":
+            return overdue_condition(on)
+        if name == "draft":
+            return Invoice.status.in_(["draft", "checked"])
+        if name in {"on_plan", "disputed", "paid", "cancelled"}:
+            return Invoice.status == name
+        return None
+
+    def invoice_counts(session: Session, on: date) -> dict:
+        by_status = dict(session.execute(select(Invoice.status, func.count(Invoice.id)).group_by(Invoice.status)).all())
+        return {
+            "all": sum(by_status.values()),
+            "open": sum(by_status.get(status, 0) for status in ("issued", "on_plan", "disputed")),
+            "overdue": session.scalar(select(func.count(Invoice.id)).where(overdue_condition(on))),
+            "on_plan": by_status.get("on_plan", 0),
+            "disputed": by_status.get("disputed", 0),
+            "draft": by_status.get("draft", 0) + by_status.get("checked", 0),
+            "paid": by_status.get("paid", 0),
+            "cancelled": by_status.get("cancelled", 0),
+        }
+
     @app.get("/api/invoices")
-    def list_invoices(session: Session = Depends(get_session, scope="function")) -> list[dict]:
+    def list_invoices(
+        filter: str = Query(default="all", max_length=20),
+        q: str = Query(default="", max_length=100),
+        sort: str = Query(default="newest", pattern="^(newest|number|customer|due|amount)$"),
+        dir: str = Query(default="desc", pattern="^(asc|desc)$"),
+        page: int = Query(default=1, ge=1, le=1000000),
+        size: int = Query(default=25, ge=1, le=100),
+        session: Session = Depends(get_session, scope="function"),
+    ) -> dict:
+        """One page at a time. Filters and sorting use indexes, so this stays fast with many invoices."""
         on = invoices.today(session)
-        rows = session.scalars(select(Invoice).order_by(Invoice.id.desc()))
-        return [invoice_summary(session, invoice, on) for invoice in rows]
+        conditions = []
+        condition = filter_condition(filter if filter in LIST_FILTERS else "all", on)
+        if condition is not None:
+            conditions.append(condition)
+        text = q.strip()
+        if text:
+            matching = select(Customer.id).where(Customer.name_key.contains(name_key(text), autoescape=True))
+            conditions.append(or_(Invoice.number.contains(text, autoescape=True), Invoice.customer_id.in_(matching)))
+
+        total = session.scalar(select(func.count(Invoice.id)).where(*conditions))
+        column = {"newest": Invoice.id, "number": Invoice.number, "customer": Customer.name_key,
+                  "due": Invoice.due_date, "amount": Invoice.gross_cents}[sort]
+        ordered = column.asc() if dir == "asc" else column.desc()
+        query = select(Invoice).where(*conditions)
+        if sort == "customer":
+            query = query.outerjoin(Customer, Invoice.customer_id == Customer.id)
+        # The id comes last, so rows with the same value keep one order between pages.
+        query = query.order_by(ordered, Invoice.id.desc()).offset((page - 1) * size).limit(size).options(
+            selectinload(Invoice.customer), selectinload(Invoice.plans).selectinload(PaymentPlan.installments)
+        )
+        rows = list(session.scalars(query))
+        pending = set(session.scalars(
+            select(Proposal.invoice_id).where(Proposal.status == "pending", Proposal.invoice_id.in_([row.id for row in rows]))
+        )) if rows else set()
+        return {
+            "items": [invoice_summary(session, row, on, pending) for row in rows],
+            "total": total,
+            "page": page,
+            "size": size,
+            "counts": invoice_counts(session, on),
+        }
 
     @app.post("/api/invoices")
-    def create_invoice(data: DraftIn, session: Session = Depends(get_session, scope="function")) -> dict:
+    def create_invoice(data: DraftIn, request: Request, session: Session = Depends(get_session, scope="function")) -> dict:
         invoice = invoices.save_draft(session, None, data.customer_id, to_lines(data.lines),
                                       data.issue_date or invoices.today(session), data.service_date, data.due_date,
                                       data.property_work, data.source_text, data.capture_source)
-        return invoice_detail(session, invoice)
+        return invoice_detail(session, invoice, language_of(request))
 
     @app.put("/api/invoices/{invoice_id}")
-    def update_invoice(invoice_id: int, data: DraftIn, session: Session = Depends(get_session, scope="function")) -> dict:
+    def update_invoice(invoice_id: int, data: DraftIn, request: Request, session: Session = Depends(get_session, scope="function")) -> dict:
         invoice = invoice_or_404(session, invoice_id)
         invoices.save_draft(session, invoice, data.customer_id, to_lines(data.lines), data.issue_date,
                             data.service_date, data.due_date, data.property_work)
-        return invoice_detail(session, invoice)
+        return invoice_detail(session, invoice, language_of(request))
+
+    @app.delete("/api/invoices/{invoice_id}")
+    def delete_invoice(invoice_id: int, session: Session = Depends(get_session, scope="function")) -> dict:
+        invoices.delete_draft(session, invoice_or_404(session, invoice_id))
+        return {"status": "deleted"}
 
     @app.get("/api/invoices/{invoice_id}")
-    def get_invoice(invoice_id: int, session: Session = Depends(get_session, scope="function")) -> dict:
+    def get_invoice(invoice_id: int, request: Request, session: Session = Depends(get_session, scope="function")) -> dict:
         invoice = invoice_or_404(session, invoice_id)
-        return invoice_detail(session, invoice)
+        return invoice_detail(session, invoice, language_of(request))
 
     @app.post("/api/invoices/{invoice_id}/check")
-    def check_invoice(invoice_id: int, session: Session = Depends(get_session, scope="function")) -> dict:
-        return check_json(invoices.run_check(session, invoice_or_404(session, invoice_id)))
+    def check_invoice(invoice_id: int, request: Request, session: Session = Depends(get_session, scope="function")) -> dict:
+        return check_json(invoices.run_check(session, invoice_or_404(session, invoice_id)), language_of(request))
 
     @app.post("/api/invoices/{invoice_id}/issue")
-    def issue_invoice(invoice_id: int, session: Session = Depends(get_session, scope="function")) -> dict:
+    def issue_invoice(invoice_id: int, request: Request, data: IssueIn | None = None,
+                      session: Session = Depends(get_session, scope="function")) -> dict:
         invoice = invoice_or_404(session, invoice_id)
         invoices.issue(session, invoice, paypal, public_base)
-        return invoice_detail(session, invoice)
+        if data and data.seconds_to_issue is not None:
+            invoice.seconds_to_issue = data.seconds_to_issue
+        return invoice_detail(session, invoice, language_of(request))
 
     @app.post("/api/invoices/{invoice_id}/sync")
-    def sync_invoice(invoice_id: int, session: Session = Depends(get_session, scope="function")) -> dict:
+    def sync_invoice(invoice_id: int, request: Request, session: Session = Depends(get_session, scope="function")) -> dict:
         invoice = invoice_or_404(session, invoice_id)
         invoices.sync(session, invoice, paypal)
-        return invoice_detail(session, invoice)
+        return invoice_detail(session, invoice, language_of(request))
 
     @app.post("/api/invoices/{invoice_id}/record-payment")
-    def record_payment(invoice_id: int, data: PaymentIn, session: Session = Depends(get_session, scope="function")) -> dict:
+    def record_payment(invoice_id: int, data: PaymentIn, request: Request, session: Session = Depends(get_session, scope="function")) -> dict:
         """For bank transfers. Many customers still pay outside PayPal, and the app must know."""
         invoice = invoice_or_404(session, invoice_id)
         amount = to_cents(data.amount_eur)
         if invoice.status not in {"issued", "disputed"} or not invoice.paypal_id:
-            raise HTTPException(422, "A payment can only be recorded on an open invoice without a plan.")
+            raise LocalizedError(Text("A payment can only be recorded on an open invoice without a plan.",
+                                      "Eine Zahlung kann nur bei einer offenen Rechnung ohne Plan erfasst werden."))
         if amount > invoice.open_cents:
-            raise HTTPException(422, "The amount is higher than what is open.")
+            raise LocalizedError(Text("The amount is higher than what is open.", "Der Betrag ist höher als der offene Betrag."))
         paypal.record_payment(invoice.paypal_id, amount, data.paid_on or date.today(), "Recorded by the owner")
         audit.record(session, "owner", "bank_payment_recorded", invoice.id, amount_cents=amount)
         invoices.sync(session, invoice, paypal)
-        return invoice_detail(session, invoice)
+        return invoice_detail(session, invoice, language_of(request))
 
     @app.post("/api/invoices/{invoice_id}/cancel")
-    def cancel_invoice(invoice_id: int, data: CancelIn, session: Session = Depends(get_session, scope="function")) -> dict:
+    def cancel_invoice(invoice_id: int, data: CancelIn, request: Request, session: Session = Depends(get_session, scope="function")) -> dict:
         invoice = invoice_or_404(session, invoice_id)
         invoices.cancel(session, invoice, paypal, data.reason)
-        return invoice_detail(session, invoice)
+        return invoice_detail(session, invoice, language_of(request))
 
     def _file(content: bytes | None, media: str, name: str) -> Response:
         if not content:
-            raise HTTPException(404, "This file does not exist yet.")
+            raise LocalizedError(Text("This file does not exist yet.", "Diese Datei gibt es noch nicht."), 404)
         safe = "".join(c for c in name if c.isalnum() or c in "-_.")
         return Response(content, media_type=media, headers={"Content-Disposition": f'attachment; filename="{safe}"'})
 
@@ -540,28 +690,38 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
     # Follow-up agent and approvals
 
     @app.post("/api/agent/run")
-    def run_agent(session: Session = Depends(get_session, scope="function")) -> list[dict]:
-        return [vars(outcome) for outcome in followup.run(session, paypal, ai, public_base)]
+    def run_agent(request: Request, session: Session = Depends(get_session, scope="function")) -> list[dict]:
+        language = language_of(request)
+        return [{**vars(outcome), "reason": pick(outcome.reason, language)} for outcome in followup.run(session, paypal, ai, public_base)]
 
     @app.get("/api/approvals")
-    def approvals(session: Session = Depends(get_session, scope="function")) -> list[dict]:
+    def approvals(request: Request, session: Session = Depends(get_session, scope="function")) -> list[dict]:
         on = invoices.today(session)
-        rows = session.scalars(select(Proposal).where(Proposal.status == "pending").order_by(Proposal.id))
-        return [proposal_json(session, proposal, on) for proposal in rows]
+        language = language_of(request)
+        rows = session.scalars(
+            select(Proposal).where(Proposal.status == "pending").order_by(Proposal.id).options(
+                selectinload(Proposal.invoice).options(
+                    selectinload(Invoice.customer),
+                    selectinload(Invoice.proposals),
+                    selectinload(Invoice.plans).selectinload(PaymentPlan.installments),
+                )
+            )
+        )
+        return [proposal_json(session, proposal, on, language) for proposal in rows]
 
     def proposal_or_404(session: Session, proposal_id: int) -> Proposal:
         proposal = session.get(Proposal, proposal_id)
         if proposal is None:
-            raise HTTPException(404, "Not found")
+            raise LocalizedError(NOT_FOUND, 404)
         return proposal
 
     @app.post("/api/approvals/{proposal_id}/approve")
-    def approve(proposal_id: int, data: ApproveIn, session: Session = Depends(get_session, scope="function")) -> dict:
-        return {"message": followup.approve(session, proposal_or_404(session, proposal_id), paypal, data.body)}
+    def approve(proposal_id: int, data: ApproveIn, request: Request, session: Session = Depends(get_session, scope="function")) -> dict:
+        return {"message": pick(followup.approve(session, proposal_or_404(session, proposal_id), paypal, data.body), language_of(request))}
 
     @app.post("/api/approvals/{proposal_id}/reject")
-    def reject(proposal_id: int, session: Session = Depends(get_session, scope="function")) -> dict:
-        return {"message": followup.reject(session, proposal_or_404(session, proposal_id))}
+    def reject(proposal_id: int, request: Request, session: Session = Depends(get_session, scope="function")) -> dict:
+        return {"message": pick(followup.reject(session, proposal_or_404(session, proposal_id)), language_of(request))}
 
     # Dashboard and audit
 
@@ -576,16 +736,33 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
         return {"accounts": {a: ledger.balance(session, a) for a in accounts}, "debit": debit, "credit": credit}
 
     @app.get("/api/audit")
-    def get_audit(invoice_id: int | None = None, session: Session = Depends(get_session, scope="function")) -> dict:
-        query = select(AuditEvent).order_by(AuditEvent.id.desc()).limit(200)
+    def get_audit(
+        invoice_id: int | None = None,
+        before_id: int | None = None,
+        limit: int = Query(default=50, ge=1, le=200),
+        session: Session = Depends(get_session, scope="function"),
+    ) -> dict:
+        """Newest first. before_id continues from the last row, so old pages are as fast as new ones."""
+        query = select(AuditEvent).order_by(AuditEvent.id.desc()).limit(limit + 1)
         if invoice_id:
             query = query.where(AuditEvent.invoice_id == invoice_id)
-        events = [
-            {"id": e.id, "at": e.at, "actor": e.actor, "action": e.action, "invoice_id": e.invoice_id,
-             "data": json.loads(e.data), "hash": e.hash[:12]}
-            for e in session.scalars(query)
-        ]
-        return {"events": events, "chain": audit.verify(session)}
+        if before_id:
+            query = query.where(AuditEvent.id < before_id)
+        rows = list(session.scalars(query))
+        shown = rows[:limit]
+        return {
+            "events": [
+                {"id": e.id, "at": e.at, "actor": e.actor, "action": e.action, "invoice_id": e.invoice_id,
+                 "data": json.loads(e.data), "hash": e.hash[:12]}
+                for e in shown
+            ],
+            "next_before_id": shown[-1].id if len(rows) > limit else None,
+        }
+
+    @app.get("/api/audit/verify")
+    def verify_audit(session: Session = Depends(get_session, scope="function")) -> dict:
+        """Reads every row, so it is a separate call from showing the list."""
+        return audit.verify(session)
 
     # Customer pages. The long random token in the link is the only way in.
 
@@ -623,11 +800,7 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
     @app.post("/api/pay/{token}/chat")
     def pay_chat(token: str, data: ChatIn, session: Session = Depends(get_session, scope="function")) -> dict:
         invoice = by_token(session, token)
-        try:
-            reply = negotiation.handle_message(session, invoice, data.text, ai, paypal)
-        except ChatRefused as error:
-            status = 429 if "Too many" in str(error) else 422
-            raise HTTPException(status, str(error)) from error
+        reply = negotiation.handle_message(session, invoice, data.text, ai, paypal)
         return {"reply": reply.text, "intent": reply.intent, "page": pay_json(session, invoice)}
 
     @app.post("/api/pay/{token}/offers/{plan_id}/accept")
@@ -635,9 +808,9 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
         invoice = by_token(session, token)
         try:
             reply = negotiation.accept_offer(session, invoice, plan_id, paypal)
-        except ChatRefused as error:
+        except ChatRefused:
             session.commit()  # keep a payment found during the check, or a withdrawn offer
-            raise HTTPException(422, str(error)) from error
+            raise
         return {"reply": reply.text, "page": pay_json(session, invoice)}
 
     @app.get("/api/pay/{token}/pdf")
@@ -649,7 +822,7 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
     def simulate_payment(token: str, session: Session = Depends(get_session, scope="function")) -> dict:
         """Only exists in simulator mode. It acts as PayPal when no sandbox keys are set."""
         if not getattr(paypal, "simulated", False):
-            raise HTTPException(404, "Not available")
+            raise LocalizedError(NOT_FOUND, 404)
         invoice = by_token(session, token)
         plan = invoice.active_plan
         if plan:
@@ -668,12 +841,12 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
         try:
             event = json.loads(await request.body())
         except ValueError as error:
-            raise HTTPException(400, "Not JSON") from error
+            raise LocalizedError("Not JSON", 400) from error
         if not isinstance(event, dict) or not event.get("id"):
-            raise HTTPException(400, "Not a webhook event")
+            raise LocalizedError("Not a webhook event", 400)
         headers = {key.lower(): value for key, value in request.headers.items()}
         if not paypal.verify_webhook(settings.paypal_webhook_id, headers, event):
-            raise HTTPException(400, "Signature check failed")
+            raise LocalizedError("Signature check failed", 400)
         with sessions() as session:
             if session.scalar(select(WebhookEvent.id).where(WebhookEvent.event_id == event["id"])):
                 return {"status": "already handled"}
@@ -714,7 +887,7 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
         @app.get("/{path:path}", include_in_schema=False)
         def frontend(path: str) -> Response:
             if path.startswith("api/"):
-                raise HTTPException(404, "Not found")
+                raise LocalizedError(NOT_FOUND, 404)
             candidate = (FRONTEND / path).resolve()
             if path and candidate.is_file() and FRONTEND.resolve() in candidate.parents:
                 return FileResponse(candidate)

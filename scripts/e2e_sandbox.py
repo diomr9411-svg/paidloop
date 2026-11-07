@@ -39,7 +39,7 @@ def call(method: str, path: str, **kwargs) -> dict | list:
 
 
 def by_customer(name: str) -> dict:
-    rows = call("GET", "/api/invoices")
+    rows = call("GET", "/api/invoices", params={"size": 100})["items"]
     return next(row for row in rows if row["customer"] and name in row["customer"]["name"])
 
 
@@ -57,7 +57,7 @@ print("  AI:", health["ai"])
 
 print("Reset demo")
 call("POST", "/api/demo/reset")
-rows = call("GET", "/api/invoices")
+rows = call("GET", "/api/invoices", params={"size": 100})["items"]
 check(len(rows) == 4, "four demo invoices", len(rows))
 view = call("GET", "/api/dashboard")
 check(view["cash_cents"] == 24990, "paid invoice shows as cash", view["cash_cents"])
@@ -146,7 +146,16 @@ with sessions() as session:
 check(client.get(old_id).status == "CANCELLED", "old PayPal request was replaced", client.get(old_id).status)
 for paypal_id, amount in installments:
     client.record_payment(paypal_id, amount, date.today(), "E2E test payment")
-done = call("POST", f"/api/invoices/{anna['id']}/sync")
+# PayPal may need a moment to show a new payment, and the app simply picks it up on a later check.
+waited = 0
+while True:
+    visible = sum(client.get(paypal_id).paid_cents for paypal_id, _ in installments)
+    done = call("POST", f"/api/invoices/{anna['id']}/sync")
+    print(f"       after {waited}s: PayPal shows {visible} of {sum(amount for _, amount in installments)} cents, invoice is {done['status']}")
+    if done["status"] == "paid" or waited >= 60:
+        break
+    time.sleep(3)
+    waited += 3
 check(done["status"] == "paid" and done["open_cents"] == 0, "all plan payments complete the invoice", done["status"])
 
 print("Customer raises a problem")
@@ -156,8 +165,8 @@ check(problem["intent"] == "dispute", "problem understood", problem["intent"])
 check(call("GET", f"/api/invoices/{bakery['id']}")["status"] == "disputed", "reminders are on hold")
 
 print("Records")
-log = call("GET", "/api/audit")
-check(log["chain"]["ok"], "audit chain intact", log["chain"])
+chain = call("GET", "/api/audit/verify")
+check(chain["ok"], "audit chain intact", chain)
 books = call("GET", "/api/ledger")
 check(books["debit"] == books["credit"], "ledger balances", books)
 view = call("GET", "/api/dashboard")

@@ -18,6 +18,7 @@ from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
 from paidloop.ai import AI
+from paidloop.i18n import LocalizedError, Text
 from paidloop.money import to_cents
 
 MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -86,7 +87,7 @@ class CaptureResult:
     source_text: str
     property_work: bool
     unsure: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    warnings: list[Text] = field(default_factory=list)
 
 
 def _number_forms(value: float) -> set[str]:
@@ -264,33 +265,38 @@ def capture_text(text: str, ai: AI) -> CaptureResult:
             source = "ai"
     warnings = []
     if suspicious:
-        warnings.append("This note has text that looks like an instruction to a computer. It was treated as plain text, so please check every value.")
+        warnings.append(Text("This note has text that looks like an instruction to a computer. It was treated as plain text, so please check every value.",
+                             "Diese Notiz enthält Text, der wie eine Anweisung an einen Computer aussieht. Er wurde als normaler Text behandelt. Bitte prüfen Sie jeden Wert."))
     return CaptureResult(answer, source, text, bool(PROPERTY_WORDS.search(text)), _mark_unsure(answer, text), warnings)
 
 
-class UnreadableFile(Exception):
+class UnreadableFile(LocalizedError):
     pass
+
+
+_WRONG_TYPE = Text("Please upload a PDF, JPG or PNG file.", "Bitte laden Sie eine PDF-, JPG- oder PNG-Datei hoch.")
 
 
 def text_from_file(data: bytes, filename: str = "") -> str:
     """Read text from a PDF or image. The file type comes from its content, not its name."""
     if len(data) > MAX_FILE_BYTES:
-        raise UnreadableFile("The file is larger than 5 MB.")
+        raise UnreadableFile(Text("The file is larger than 5 MB.", "Die Datei ist größer als 5 MB."))
     if data.startswith(b"%PDF-"):
         try:
             text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(data)).pages[:5]).strip()
         except (PdfReadError, ValueError, KeyError, OSError) as error:
-            raise UnreadableFile("This PDF cannot be read.") from error
+            raise UnreadableFile(Text("This PDF cannot be read.", "Dieses PDF kann nicht gelesen werden.")) from error
         if not text:
-            raise UnreadableFile("This PDF has no text. Try a photo of it instead.")
+            raise UnreadableFile(Text("This PDF has no text. Try a photo of it instead.",
+                                      "Dieses PDF enthält keinen Text. Versuchen Sie es mit einem Foto."))
         return text
     try:
         image = Image.open(BytesIO(data))
         image.verify()
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as error:
-        raise UnreadableFile("Please upload a PDF, JPG or PNG file.") from error
+        raise UnreadableFile(_WRONG_TYPE) from error
     if image.format not in {"JPEG", "PNG"}:
-        raise UnreadableFile("Please upload a PDF, JPG or PNG file.")
+        raise UnreadableFile(_WRONG_TYPE)
     return _ocr(data)
 
 
@@ -307,7 +313,7 @@ def _ocr(data: bytes) -> str:
     result, _ = _ocr_engine(data)
     text = "\n".join(item[1] for item in result or [])
     if not text.strip():
-        raise UnreadableFile("No text was found in this photo.")
+        raise UnreadableFile(Text("No text was found in this photo.", "Auf diesem Foto wurde kein Text gefunden."))
     return text
 
 

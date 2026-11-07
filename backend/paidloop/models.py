@@ -9,13 +9,14 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from paidloop.db import Base
 
@@ -49,6 +50,10 @@ class InvalidTransition(Exception):
     pass
 
 
+def name_key(name: str) -> str:
+    return " ".join((name or "").casefold().split())
+
+
 class Business(Base):
     __tablename__ = "business"
 
@@ -78,9 +83,11 @@ class Business(Base):
 
 class Customer(Base):
     __tablename__ = "customer"
+    __table_args__ = (Index("ix_customer_name_key", "name_key"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
+    name_key: Mapped[str] = mapped_column(String(200), default="")  # for finding the same customer again
     street: Mapped[str] = mapped_column(String(200), default="")
     postcode: Mapped[str] = mapped_column(String(20), default="")
     city: Mapped[str] = mapped_column(String(100), default="")
@@ -95,9 +102,26 @@ class Customer(Base):
 
     invoices: Mapped[list[Invoice]] = relationship(back_populates="customer")
 
+    @validates("name")
+    def _keep_name_key(self, _key: str, value: str) -> str:
+        self.name_key = name_key(value)
+        return value
+
 
 class Invoice(Base):
     __tablename__ = "invoice"
+    __table_args__ = (
+        Index("ix_invoice_status_id", "status", "id"),  # list by status, newest first
+        Index("ix_invoice_status_due", "status", "due_date"),  # overdue and sort by due date
+        Index("ix_invoice_status_gross", "status", "gross_cents"),  # sort by amount
+        Index("ix_invoice_due", "due_date"),  # all invoices, sorted by due date
+        Index("ix_invoice_gross", "gross_cents"),  # all invoices, sorted by amount
+        Index("ix_invoice_customer_paid", "customer_id", "paid_on", "due_date"),  # payment history for the risk score
+        Index("ix_invoice_customer_id", "customer_id", "id"),  # filter by customer, newest first
+        Index("ix_invoice_paypal_id", "paypal_id"),  # find an invoice from a PayPal webhook
+        Index("ix_invoice_paid_results", "status", "paid_on", "due_date", "issue_date"),  # results on Home, from the index alone
+        Index("ix_invoice_timed", "seconds_to_issue"),  # time from note to issued invoice
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customer.id"), nullable=True)
@@ -119,12 +143,13 @@ class Invoice(Base):
     paypal_id: Mapped[str | None] = mapped_column(String(60), nullable=True)
     paypal_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
     pay_link: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    qr_png: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    xml: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    pdf: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Files load only when asked for, so lists and the home screen never read every PDF.
+    qr_png: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    xml: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    pdf: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
     credit_note_number: Mapped[str | None] = mapped_column(String(40), unique=True, nullable=True)
-    credit_note_xml: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    credit_note_pdf: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    credit_note_xml: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    credit_note_pdf: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
     public_token: Mapped[str | None] = mapped_column(String(60), unique=True, nullable=True)
 
     reminder_level: Mapped[int] = mapped_column(Integer, default=0)
@@ -132,6 +157,7 @@ class Invoice(Base):
     default_since: Mapped[date | None] = mapped_column(Date, nullable=True)
     paused_until: Mapped[date | None] = mapped_column(Date, nullable=True)
     paid_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    seconds_to_issue: Mapped[int | None] = mapped_column(Integer, nullable=True)  # time study: note to issued
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -168,6 +194,7 @@ class Invoice(Base):
 
 class InvoiceLine(Base):
     __tablename__ = "invoice_line"
+    __table_args__ = (Index("ix_invoice_line_invoice", "invoice_id", "position"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     invoice_id: Mapped[int] = mapped_column(ForeignKey("invoice.id"))
@@ -184,6 +211,7 @@ class InvoiceLine(Base):
 
 class Payment(Base):
     __tablename__ = "payment"
+    __table_args__ = (Index("ix_payment_invoice", "invoice_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     invoice_id: Mapped[int] = mapped_column(ForeignKey("invoice.id"))
@@ -197,6 +225,7 @@ class Payment(Base):
 
 class PaymentPlan(Base):
     __tablename__ = "payment_plan"
+    __table_args__ = (Index("ix_plan_invoice_status", "invoice_id", "status"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     invoice_id: Mapped[int] = mapped_column(ForeignKey("invoice.id"))
@@ -212,6 +241,11 @@ class PaymentPlan(Base):
 
 class Installment(Base):
     __tablename__ = "installment"
+    __table_args__ = (
+        Index("ix_installment_plan", "plan_id", "seq"),
+        Index("ix_installment_paypal_id", "paypal_id"),
+        Index("ix_installment_due", "due_date", "plan_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     plan_id: Mapped[int] = mapped_column(ForeignKey("payment_plan.id"))
@@ -234,11 +268,16 @@ class Proposal(Base):
     """Something the agent wants to do. Serious steps wait here for the owner."""
 
     __tablename__ = "proposal"
+    __table_args__ = (
+        Index("ix_proposal_status_id", "status", "id"),  # the approval queue
+        Index("ix_proposal_invoice_status", "invoice_id", "status"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     invoice_id: Mapped[int] = mapped_column(ForeignKey("invoice.id"))
     action: Mapped[str] = mapped_column(String(30))
     reason: Mapped[str] = mapped_column(Text, default="")
+    reason_de: Mapped[str] = mapped_column(Text, default="")
     decided_by_ai: Mapped[bool] = mapped_column(Boolean, default=False)
     subject: Mapped[str] = mapped_column(String(200), default="")
     body: Mapped[str] = mapped_column(Text, default="")
@@ -252,6 +291,10 @@ class Proposal(Base):
 
 class ChatMessage(Base):
     __tablename__ = "chat_message"
+    __table_args__ = (
+        Index("ix_chat_invoice_role_time", "invoice_id", "role", "created_at"),  # message limit per hour
+        Index("ix_chat_invoice_id", "invoice_id", "id"),  # show a conversation in order
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     invoice_id: Mapped[int] = mapped_column(ForeignKey("invoice.id"))
@@ -265,6 +308,7 @@ class ChatMessage(Base):
 
 class JournalEntry(Base):
     __tablename__ = "journal_entry"
+    __table_args__ = (Index("ix_journal_entry_invoice", "invoice_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     idempotency_key: Mapped[str] = mapped_column(String(120), unique=True)
@@ -276,6 +320,10 @@ class JournalEntry(Base):
 
 class JournalLine(Base):
     __tablename__ = "journal_line"
+    __table_args__ = (
+        Index("ix_journal_line_entry", "entry_id"),
+        Index("ix_journal_line_account", "account", "debit_cents", "credit_cents"),  # balances without reading the table
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     entry_id: Mapped[int] = mapped_column(ForeignKey("journal_entry.id"))
@@ -288,6 +336,7 @@ class AuditEvent(Base):
     """Append-only log. Each row includes the hash of the row before it."""
 
     __tablename__ = "audit_event"
+    __table_args__ = (Index("ix_audit_invoice_id", "invoice_id", "id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     at: Mapped[str] = mapped_column(String(40))

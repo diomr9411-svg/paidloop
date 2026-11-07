@@ -1,76 +1,149 @@
 import { useEffect, useState } from "react";
 
-import { api, day, eur, post } from "../api";
-import { StatusPill } from "./Invoices";
+import { api, customerLink, del, post, toNumber } from "../api";
+import { ErrorBox, Field, Loading, StatusPill, TwoStepButton, useCopyLink, useToast } from "../components";
+import { useT } from "../i18n";
+import { eventText } from "./Audit";
 
 export function InvoiceDetail({ id, version, refresh }: { id: number; version: number; refresh: () => void }) {
+  const tools = useT();
+  const { t, lang, labels, eur, day, dateTime, daysLate } = tools;
+  const toast = useToast();
+  const copyLink = useCopyLink();
   const [invoice, setInvoice] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [bank, setBank] = useState("");
-  const [cancelStep, setCancelStep] = useState(false);
+  const [bankError, setBankError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const [interval, setIntervalSeconds] = useState(20);
 
   useEffect(() => {
     let alive = true;
     const load = () => {
-      api(`/api/invoices/${id}`).then((data) => alive && setInvoice(data)).catch((e) => alive && setError(e.message));
-      api(`/api/audit?invoice_id=${id}`).then((data) => alive && setEvents(data.events)).catch(() => undefined);
+      api(`/api/invoices/${id}`)
+        .then((data) => {
+          if (!alive) return;
+          setInvoice(data);
+          setError("");
+        })
+        .catch((e) => alive && setError(e.message));
+      api(`/api/audit?invoice_id=${id}&limit=50`).then((data) => alive && setEvents(data.events)).catch(() => undefined);
     };
     load();
-    const timer = setInterval(load, 10000);
+    api("/api/health").then((data) => alive && setIntervalSeconds(data.sync?.interval_seconds || 20)).catch(() => undefined);
+    const timer = window.setInterval(load, 10000);
     return () => {
       alive = false;
-      clearInterval(timer);
+      window.clearInterval(timer);
     };
-  }, [id, version]);
+  }, [id, version, attempt]);
 
-  async function act(action: () => Promise<any>) {
+  async function act(action: () => Promise<any>, success: string): Promise<boolean> {
     setBusy(true);
     setError("");
     try {
       setInvoice(await action());
+      toast(success);
       refresh();
+      return true;
     } catch (e) {
       setError((e as Error).message);
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
-  if (error && !invoice) return <div className="alert error">{error}</div>;
-  if (!invoice) return <p className="muted">Loading...</p>;
+  if (error && !invoice) return <ErrorBox text={error} onRetry={() => setAttempt((a) => a + 1)} />;
+  if (!invoice) return <Loading />;
 
+  const isDraft = invoice.status === "draft" || invoice.status === "checked";
   const open = ["issued", "on_plan", "disputed"].includes(invoice.status);
-  const customerPage = invoice.public_token ? `#/pay/${invoice.public_token}` : null;
+  const late = open && invoice.days_overdue > 0 && invoice.status !== "disputed";
+
+  let now = "";
+  if (isDraft) now = t("nowDraft");
+  else if (invoice.status === "paid") now = t("nowPaid");
+  else if (invoice.status === "cancelled") now = t("nowCancelled");
+  else if (invoice.status === "disputed") now = t("nowHold");
+  else if (late) now = t("nowOverdue", { late: daysLate(invoice.days_overdue) });
+  else if (invoice.status === "on_plan") now = t("nowPlan");
+  else now = t("nowOpen", { date: day(invoice.due_date), seconds: interval });
 
   return (
     <>
       <div className="title-row">
         <div>
           <a className="muted small" href="#/invoices">
-            ← All invoices
+            ← {t("allInvoices")}
           </a>
-          <h1>{invoice.number || `Draft ${invoice.id}`}</h1>
+          <h1>{invoice.number || t("draftNumber", { id: invoice.id })}</h1>
         </div>
         <StatusPill status={invoice.status} overdue={invoice.days_overdue} />
       </div>
-      {error && <div className="alert error">{error}</div>}
+      {error && <ErrorBox text={error} />}
+
+      <div className={`card now ${invoice.has_pending || late ? "attention" : ""}`}>
+        <div>
+          {now}
+          {invoice.has_pending && <strong> {t("nowWaiting")}</strong>}
+        </div>
+        <div className="button-row tight">
+          {invoice.has_pending && (
+            <a className="button primary" href="#/approvals">
+              {t("openApprovals")}
+            </a>
+          )}
+          {isDraft && (
+            <>
+              <a className="button primary" href={`#/new?draft=${invoice.id}`}>
+                {t("continueDraft")}
+              </a>
+              <TwoStepButton
+                label={t("deleteDraft")}
+                confirmLabel={t("deleteConfirm")}
+                disabled={busy}
+                onConfirm={async () => {
+                  setBusy(true);
+                  try {
+                    await del(`/api/invoices/${id}`);
+                    toast(t("draftDeleted"));
+                    refresh();
+                    window.location.hash = "#/invoices";
+                  } catch (e) {
+                    setError((e as Error).message);
+                    setBusy(false);
+                  }
+                }}
+              />
+            </>
+          )}
+        </div>
+      </div>
 
       <div className="columns wide-left">
         <section className="card">
           <h2>{invoice.customer?.name}</h2>
           <p className="muted">
-            {invoice.customer?.is_business ? "Business customer" : "Private customer"}
+            {invoice.customer?.is_business ? t("businessCustomer") : t("privateCustomer")}
             {invoice.customer?.city ? `, ${invoice.customer.city}` : ""}
+            {invoice.customer ? ` · ${invoice.customer.language === "en" ? t("langEnglish") : t("langGerman")}` : ""}
           </p>
           <table>
             <thead>
               <tr>
-                <th>Item</th>
-                <th className="num">Qty</th>
-                <th className="num">Price</th>
-                <th className="num">Net</th>
+                <th scope="col">{t("item")}</th>
+                <th scope="col" className="num">
+                  {t("qty")}
+                </th>
+                <th scope="col" className="num">
+                  {t("price")}
+                </th>
+                <th scope="col" className="num">
+                  {t("net")}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -78,7 +151,7 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
                 <tr key={index}>
                   <td>{line.description}</td>
                   <td className="num">
-                    {line.quantity} {line.unit === "HUR" ? "h" : ""}
+                    {new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-GB").format(line.quantity)} {line.unit === "HUR" ? t("unitHours") : ""}
                   </td>
                   <td className="num">{eur(line.unit_price_cents)}</td>
                   <td className="num">{eur(line.net_cents)}</td>
@@ -87,69 +160,86 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={3}>Net</td>
+                <td colSpan={3}>{t("net")}</td>
                 <td className="num">{eur(invoice.net_cents)}</td>
               </tr>
               <tr>
-                <td colSpan={3}>VAT</td>
+                <td colSpan={3}>{t("vat")}</td>
                 <td className="num">{eur(invoice.vat_cents)}</td>
               </tr>
               <tr className="total">
-                <td colSpan={3}>Total</td>
+                <td colSpan={3}>{t("total")}</td>
                 <td className="num">{eur(invoice.gross_cents)}</td>
               </tr>
-              <tr>
-                <td colSpan={3}>Paid</td>
-                <td className="num">{eur(invoice.paid_cents)}</td>
-              </tr>
-              <tr className="total">
-                <td colSpan={3}>Still open</td>
-                <td className="num">{eur(invoice.open_cents)}</td>
-              </tr>
+              {!isDraft && (
+                <>
+                  <tr>
+                    <td colSpan={3}>{t("paid")}</td>
+                    <td className="num">{eur(invoice.paid_cents)}</td>
+                  </tr>
+                  <tr className="total">
+                    <td colSpan={3}>{t("stillOpen")}</td>
+                    <td className="num">{eur(invoice.open_cents)}</td>
+                  </tr>
+                </>
+              )}
             </tfoot>
           </table>
           <dl className="facts">
-            <dt>Invoice date</dt>
+            <dt>{t("invoiceDate")}</dt>
             <dd>{day(invoice.issue_date)}</dd>
-            <dt>Work done on</dt>
+            <dt>{t("workDate")}</dt>
             <dd>{day(invoice.service_date)}</dd>
-            <dt>Due</dt>
+            <dt>{t("due")}</dt>
             <dd>{day(invoice.due_date)}</dd>
           </dl>
+          {invoice.source_text && (
+            <details>
+              <summary>{t("sourceNote")}</summary>
+              <p className="pre small">{invoice.source_text}</p>
+            </details>
+          )}
         </section>
 
         <section className="stack">
-          <div className="card">
-            <h2>Documents and links</h2>
-            <div className="button-row">
-              <a className="button" href={`/api/invoices/${id}/pdf`}>
-                E-invoice PDF
-              </a>
-              <a className="button" href={`/api/invoices/${id}/xml`}>
-                XML
-              </a>
-              {invoice.credit_note_number && (
-                <a className="button" href={`/api/invoices/${id}/credit-note`}>
-                  Credit note {invoice.credit_note_number}
+          {!isDraft && (
+            <div className="card">
+              <h2>{t("documents")}</h2>
+              <div className="button-row">
+                <a className="button" href={`/api/invoices/${id}/pdf`}>
+                  {t("downloadPdf")}
                 </a>
-              )}
-              {invoice.pay_link && !invoice.plan && invoice.status !== "cancelled" && (
-                <a className="button" href={invoice.pay_link} target="_blank" rel="noreferrer">
-                  PayPal link
+                <a className="button" href={`/api/invoices/${id}/xml`}>
+                  {t("xml")}
                 </a>
-              )}
-              {customerPage && (
-                <a className="button primary" href={customerPage} target="_blank" rel="noreferrer">
-                  Customer page
-                </a>
-              )}
+                {invoice.credit_note_number && (
+                  <a className="button" href={`/api/invoices/${id}/credit-note`}>
+                    {t("creditNote", { number: invoice.credit_note_number })}
+                  </a>
+                )}
+                {invoice.pay_link && !invoice.plan && invoice.status !== "cancelled" && (
+                  <a className="button" href={invoice.pay_link} target="_blank" rel="noreferrer">
+                    {t("paypalLink")}
+                  </a>
+                )}
+                {invoice.public_token && (
+                  <>
+                    <a className="button primary" href={`#/pay/${invoice.public_token}`} target="_blank" rel="noreferrer">
+                      {t("customerPage")}
+                    </a>
+                    <button onClick={() => copyLink(customerLink(invoice.public_token))}>{t("copyLink")}</button>
+                  </>
+                )}
+              </div>
+              <p className="muted small">{t("documentsHint")}</p>
             </div>
-            <p className="muted small">The PDF is a ZUGFeRD e-invoice with the XML inside. It passed the official EN 16931 rules before it was issued.</p>
-          </div>
+          )}
 
           {invoice.risk && open && (
             <div className="card">
-              <h2>Payment risk: {invoice.risk.level}</h2>
+              <h2>
+                {t("paymentRisk")}: {invoice.risk.level === "high" ? `! ${t("riskHigh")}` : invoice.risk.level === "medium" ? t("riskMedium") : t("riskLow")}
+              </h2>
               <ul className="plain">
                 {invoice.risk.reasons.map((reason: string) => (
                   <li key={reason}>{reason}</li>
@@ -157,9 +247,12 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
               </ul>
               {invoice.late_costs?.in_default && (
                 <p className="small">
-                  In default since {day(invoice.late_costs.default_since)}. You could claim {eur(invoice.late_costs.interest_cents)} interest at{" "}
-                  {invoice.late_costs.rate_percent}% a year
-                  {invoice.late_costs.flat_fee_cents ? ` and a ${eur(invoice.late_costs.flat_fee_cents)} flat fee` : ""}.
+                  {t(invoice.late_costs.flat_fee_cents ? "inDefaultFee" : "inDefault", {
+                    date: day(invoice.late_costs.default_since),
+                    interest: eur(invoice.late_costs.interest_cents),
+                    rate: lang === "de" ? String(invoice.late_costs.rate_percent).replace(".", ",") : invoice.late_costs.rate_percent,
+                    fee: eur(invoice.late_costs.flat_fee_cents),
+                  })}
                 </p>
               )}
             </div>
@@ -167,23 +260,25 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
 
           {invoice.plan && (
             <div className="card">
-              <h2>Payment plan</h2>
+              <h2>{t("paymentPlan")}</h2>
               <table>
                 <thead>
                   <tr>
-                    <th>#</th>
-                    <th>Due</th>
-                    <th className="num">Amount</th>
-                    <th>Status</th>
+                    <th scope="col">#</th>
+                    <th scope="col">{t("due")}</th>
+                    <th scope="col" className="num">
+                      {t("amount")}
+                    </th>
+                    <th scope="col">{t("status")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {invoice.plan.installments.map((item: any) => (
                     <tr key={item.seq}>
                       <td>{item.seq}</td>
-                      <td>{day(item.due_date)}</td>
+                      <td className="nowrap">{day(item.due_date)}</td>
                       <td className="num">{eur(item.amount_cents)}</td>
-                      <td>{item.is_paid ? "✓ Paid" : "Open"}</td>
+                      <td>{item.is_paid ? t("planPaid") : t("planOpen")}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -193,48 +288,47 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
 
           {open && (
             <div className="card">
-              <h2>Other actions</h2>
+              <h2>{t("otherActions")}</h2>
               {invoice.status !== "on_plan" && (
                 <div className="inline-form">
-                  <label>
-                    Customer paid by bank transfer (EUR)
-                    <input value={bank} inputMode="decimal" placeholder={(invoice.open_cents / 100).toFixed(2)} onChange={(e) => setBank(e.target.value)} />
-                  </label>
+                  <Field id="bank-payment" label={t("bankPayment")} error={bankError}>
+                    <input
+                      value={bank}
+                      inputMode="decimal"
+                      placeholder={(invoice.open_cents / 100).toLocaleString(lang === "de" ? "de-DE" : "en-GB", { minimumFractionDigits: 2 })}
+                      onChange={(event) => {
+                        setBank(event.target.value);
+                        setBankError("");
+                      }}
+                    />
+                  </Field>
                   <button
                     disabled={busy}
-                    onClick={() => {
-                      const raw = (bank || String(invoice.open_cents / 100)).trim();
-                      const amount = Number(raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw);
+                    onClick={async () => {
+                      const amount = bank.trim() ? toNumber(bank, lang) : invoice.open_cents / 100;
                       if (!(amount > 0)) {
-                        setError("Please enter an amount above zero.");
+                        setBankError(t("amountAboveZero"));
                         return;
                       }
-                      act(() => post(`/api/invoices/${id}/record-payment`, { amount_eur: amount })).then(() => setBank(""));
+                      const done = await act(() => post(`/api/invoices/${id}/record-payment`, { amount_eur: amount }), t("paymentRecorded"));
+                      if (done) setBank("");
                     }}
                   >
-                    Record payment
+                    {t("recordPayment")}
                   </button>
                 </div>
               )}
               {invoice.paid_cents === 0 && (
                 <div className="button-row">
-                  <button
-                    className="danger"
+                  <TwoStepButton
+                    label={t("cancelInvoice")}
+                    confirmLabel={t("cancelConfirm")}
+                    hint={t("cancelHint")}
                     disabled={busy}
-                    onClick={() => {
-                      if (!cancelStep) {
-                        setCancelStep(true);
-                        return;
-                      }
-                      setCancelStep(false);
-                      act(() => post(`/api/invoices/${id}/cancel`, { reason: "Cancelled by the owner" }));
-                    }}
-                  >
-                    {cancelStep ? "Yes, cancel this invoice" : "Cancel invoice"}
-                  </button>
+                    onConfirm={() => act(() => post(`/api/invoices/${id}/cancel`, { reason: t("cancelReason") }), t("cancelled"))}
+                  />
                 </div>
               )}
-              {cancelStep && <p className="muted small">The invoice is kept. A legal credit note (Stornorechnung) is created, the ledger entry is reversed, and the PayPal request is cancelled.</p>}
             </div>
           )}
         </section>
@@ -242,7 +336,7 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
 
       {invoice.messages.length > 0 && (
         <section className="card">
-          <h2>Chat with the customer</h2>
+          <h2>{t("chatWithCustomer")}</h2>
           <div className="chat readonly">
             {invoice.messages.map((message: any, index: number) => (
               <div key={index} className={`bubble ${message.role}`}>
@@ -254,21 +348,27 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
       )}
 
       <section className="card">
-        <h2>What happened</h2>
-        <table>
-          <tbody>
-            {events.map((event) => (
-              <tr key={event.id}>
-                <td className="nowrap muted">{event.at.slice(0, 16).replace("T", " ")}</td>
-                <td>
-                  <span className={`actor ${event.actor}`}>{event.actor}</span>
-                </td>
-                <td>{event.action.replaceAll("_", " ")}</td>
-                <td className="muted small">{event.data.reason || event.data.action || event.data.intent || ""}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <h2>{t("whatHappened")}</h2>
+        {events.length === 0 ? (
+          <p className="muted">{t("nothingYet")}</p>
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <tbody>
+                {events.map((event) => (
+                  <tr key={event.id}>
+                    <td className="nowrap muted">{dateTime(event.at)}</td>
+                    <td>
+                      <span className={`actor ${event.actor}`}>{labels.actor[event.actor] || event.actor}</span>
+                    </td>
+                    <td>{labels.audit[event.action] || event.action.replaceAll("_", " ")}</td>
+                    <td className="muted small">{eventText(event.data, tools)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </>
   );

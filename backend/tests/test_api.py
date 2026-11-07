@@ -76,7 +76,7 @@ def test_full_owner_story(api):
     assert api.get("/api/approvals").json() == []
 
     audit = api.get("/api/audit").json()
-    assert audit["chain"]["ok"] is True
+    assert api.get("/api/audit/verify").json()["ok"] is True
     assert {e["actor"] for e in audit["events"]} >= {"owner", "rules"}
 
 
@@ -250,17 +250,17 @@ def test_webhook_triggers_payment_update(api):
 
 def test_demo_reset_builds_the_story_and_can_repeat(api):
     assert api.post("/api/demo/reset").status_code == 200
-    rows = api.get("/api/invoices").json()
+    rows = api.get("/api/invoices").json()["items"]
     assert len(rows) == 4
     assert sum(1 for r in rows if r["status"] == "paid") == 1
     assert sum(1 for r in rows if r["days_overdue"] > 0 and r["status"] == "issued") >= 2
     view = api.get("/api/dashboard").json()
     assert view["cash_cents"] > 0 and view["ledger_balanced"] is True
-    assert api.get("/api/audit").json()["chain"]["ok"] is True
+    assert api.get("/api/audit/verify").json()["ok"] is True
 
     assert api.post("/api/demo/reset").status_code == 200
-    assert len(api.get("/api/invoices").json()) == 4
-    assert api.get("/api/audit").json()["chain"]["ok"] is True
+    assert api.get("/api/invoices").json()["total"] == 4
+    assert api.get("/api/audit/verify").json()["ok"] is True
 
 
 def test_settings_limits_are_validated_and_used(api):

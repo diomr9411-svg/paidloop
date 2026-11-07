@@ -43,9 +43,26 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 from paidloop.compliance import InvoiceFacts, vat_groups
-from paidloop.money import eur_de, to_decimal
+from paidloop.money import eur, eur_de, to_decimal
 
 SMALL_BUSINESS_REASON = "Kleinunternehmer gemäß § 19 UStG"
+
+LABELS = {
+    "de": {
+        "invoice": "Rechnung", "credit": "Stornorechnung", "vat_id": "USt-IdNr.", "tax_no": "Steuernummer",
+        "service": "Leistungsdatum", "date": "Rechnungsdatum", "credit_date": "Datum", "due": "Zahlbar bis",
+        "cancels": "Storniert Rechnung", "of": "vom", "pos": "Pos.", "item": "Beschreibung", "qty": "Menge",
+        "unit_price": "Einzelpreis", "net": "Netto", "sum_net": "Summe netto", "vat": "USt.", "total": "Gesamtbetrag",
+        "pay": "Online bezahlen mit PayPal", "pay_short": "Online bezahlen", "footer": "Erstellt mit PaidLoop. Keine Steuer- oder Rechtsberatung.",
+    },
+    "en": {
+        "invoice": "Invoice", "credit": "Credit note", "vat_id": "VAT ID", "tax_no": "Tax number",
+        "service": "Date of service", "date": "Invoice date", "credit_date": "Date", "due": "Due by",
+        "cancels": "Cancels invoice", "of": "of", "pos": "No.", "item": "Description", "qty": "Qty",
+        "unit_price": "Unit price", "net": "Net", "sum_net": "Net total", "vat": "VAT", "total": "Total",
+        "pay": "Pay online with PayPal", "pay_short": "Pay online", "footer": "Created with PaidLoop. Not tax or legal advice.",
+    },
+}
 
 
 class EInvoiceInvalid(Exception):
@@ -119,9 +136,10 @@ def build_xml(
         settlement.payment_means.add(means)
 
         terms = PaymentTerms()
-        text = f"Zahlbar bis {facts.due_date:%d.%m.%Y}."
+        labels = LABELS["en" if facts.buyer_language == "en" else "de"]
+        text = f"{labels['due']} {facts.due_date:%d.%m.%Y}."
         if pay_link:
-            text += f" Online bezahlen: {pay_link}"
+            text += f" {labels['pay_short']}: {pay_link}"
         terms.description = text
         terms.due = facts.due_date
         settlement.terms.add(terms)
@@ -232,14 +250,16 @@ def build_pdf(
     qr_png: bytes | None,
     corrects: tuple[str, date] | None = None,
 ) -> bytes:
-    """The readable part of the invoice. It is in German, because that is what the customer needs."""
+    """The readable part of the invoice, in the customer's language."""
     _register_fonts()
-    title = "Stornorechnung" if corrects else "Rechnung"
+    labels = LABELS["en" if facts.buyer_language == "en" else "de"]
+    money = eur if facts.buyer_language == "en" else eur_de
+    title = labels["credit"] if corrects else labels["invoice"]
     buffer = BytesIO()
     page = canvas.Canvas(buffer, pagesize=A4, invariant=1)
     page.setTitle(f"{title} {number}")
     page.setAuthor(facts.seller.name)
-    page.setSubject("Rechnung")
+    page.setSubject(title)
     left, right = 55, 540
     y = 790
 
@@ -248,7 +268,7 @@ def build_pdf(
     page.setFont("Vera", 9)
     y -= 14
     page.drawString(left, y, f"{facts.seller.street}, {facts.seller.postcode} {facts.seller.city}")
-    tax_id = f"USt-IdNr.: {facts.seller_vat_id}" if facts.seller_vat_id else f"Steuernummer: {facts.seller_tax_number}"
+    tax_id = f"{labels['vat_id']}: {facts.seller_vat_id}" if facts.seller_vat_id else f"{labels['tax_no']}: {facts.seller_tax_number}"
     y -= 12
     page.drawString(left, y, tax_id)
 
@@ -264,18 +284,18 @@ def build_pdf(
     page.drawString(left, y, f"{title} {number}")
     y -= 20
     page.setFont("Vera", 9)
-    service = f"Leistungsdatum: {facts.service_date:%d.%m.%Y}   " if facts.service_date else ""
+    service = f"{labels['service']}: {facts.service_date:%d.%m.%Y}   " if facts.service_date else ""
     if corrects:
-        page.drawString(left, y, f"Datum: {facts.issue_date:%d.%m.%Y}   {service}Storniert Rechnung {corrects[0]} vom {corrects[1]:%d.%m.%Y}")
+        page.drawString(left, y, f"{labels['credit_date']}: {facts.issue_date:%d.%m.%Y}   {service}{labels['cancels']} {corrects[0]} {labels['of']} {corrects[1]:%d.%m.%Y}")
     else:
-        page.drawString(left, y, f"Rechnungsdatum: {facts.issue_date:%d.%m.%Y}   {service}Zahlbar bis: {facts.due_date:%d.%m.%Y}")
+        page.drawString(left, y, f"{labels['date']}: {facts.issue_date:%d.%m.%Y}   {service}{labels['due']}: {facts.due_date:%d.%m.%Y}")
 
     y -= 28
     page.setFont("VeraBd", 9)
-    page.drawString(left, y, "Pos.  Beschreibung")
-    page.drawRightString(390, y, "Menge")
-    page.drawRightString(460, y, "Einzelpreis")
-    page.drawRightString(right, y, "Netto")
+    page.drawString(left, y, f"{labels['pos']}  {labels['item']}")
+    page.drawRightString(390, y, labels["qty"])
+    page.drawRightString(460, y, labels["unit_price"])
+    page.drawRightString(right, y, labels["net"])
     y -= 5
     page.line(left, y, right, y)
     page.setFont("Vera", 9)
@@ -285,8 +305,8 @@ def build_pdf(
         page.drawString(left, y, f"{position}")
         page.drawString(left + 28, y, wrapped[0])
         page.drawRightString(390, y, f"{_qty(line.quantity_milli).normalize():f}")
-        page.drawRightString(460, y, eur_de(line.unit_price_cents))
-        page.drawRightString(right, y, eur_de(line.net_cents))
+        page.drawRightString(460, y, money(line.unit_price_cents))
+        page.drawRightString(right, y, money(line.net_cents))
         for extra in wrapped[1:]:
             y -= 12
             page.drawString(left + 28, y, extra)
@@ -294,17 +314,17 @@ def build_pdf(
     y -= 8
     page.line(left, y, right, y)
     y -= 16
-    page.drawRightString(460, y, "Summe netto")
-    page.drawRightString(right, y, eur_de(sum(line.net_cents for line in facts.lines)))
+    page.drawRightString(460, y, labels["sum_net"])
+    page.drawRightString(right, y, money(sum(line.net_cents for line in facts.lines)))
     if not facts.seller_small_business:
         for vat_bp, (_net, vat) in sorted(vat_groups(facts.lines).items()):
             y -= 14
-            page.drawRightString(460, y, f"USt. {Decimal(vat_bp) / 100:.0f} %")
-            page.drawRightString(right, y, eur_de(vat))
+            page.drawRightString(460, y, f"{labels['vat']} {Decimal(vat_bp) / 100:.0f} %")
+            page.drawRightString(right, y, money(vat))
     y -= 18
     page.setFont("VeraBd", 11)
-    page.drawRightString(460, y, "Gesamtbetrag")
-    page.drawRightString(right, y, eur_de(facts.gross_cents))
+    page.drawRightString(460, y, labels["total"])
+    page.drawRightString(right, y, money(facts.gross_cents))
 
     y -= 32
     page.setFont("Vera", 9)
@@ -317,7 +337,7 @@ def build_pdf(
     if pay_link:
         y -= 8
         page.setFont("VeraBd", 10)
-        page.drawString(left, y, "Online bezahlen mit PayPal")
+        page.drawString(left, y, labels["pay"])
         page.setFont("Vera", 8)
         y -= 13
         for wrapped_line in simpleSplit(pay_link, "Vera", 8, 340):
@@ -328,7 +348,7 @@ def build_pdf(
             page.drawImage(ImageReader(image), 440, y - 60, width=100, height=100)
 
     page.setFont("Vera", 7)
-    page.drawString(left, 40, "Erstellt mit PaidLoop. Keine Steuer- oder Rechtsberatung.")
+    page.drawString(left, 40, labels["footer"])
     page.save()
     return buffer.getvalue()
 

@@ -1128,3 +1128,58 @@ def test_overdue_totals_follow_the_clock(db, paypal):
     assert dashboard.build(db)["overdue_cents"] == 0
     jump(db, 15)
     assert dashboard.build(db)["overdue_cents"] == 45220
+
+
+def test_two_payment_checks_at_once_count_a_payment_once(tmp_path):
+    """The background check and a customer opening the page can ask PayPal at the same moment."""
+    import threading
+
+    from paidloop.db import make_session_factory, prepare
+    from paidloop.models import Business, Payment
+
+    engine = make_engine(f"sqlite:///{tmp_path / 'race.db'}")
+    prepare(engine)
+    sessions = make_session_factory(engine)
+    paypal = SimulatedPayPal()
+    with sessions() as session:
+        session.add(Business(name="Beispiel Elektro GmbH", street="Musterstraße 1", postcode="32657", city="Lemgo",
+                             vat_id="DE123456789", email="owner@example.com"))
+        session.flush()
+        invoice = make_issued(session, paypal)
+        session.commit()
+        invoice_id, paypal_id, gross = invoice.id, invoice.paypal_id, invoice.gross_cents
+    paypal.pay(paypal_id)
+
+    # Both checks read the invoice and PayPal before either one saves anything.
+    both_asked = threading.Barrier(2, timeout=20)
+    real_get = paypal.get
+
+    def get_together(wanted):
+        state = real_get(wanted)
+        both_asked.wait()
+        return state
+
+    paypal.get = get_together
+    problems: list[BaseException] = []
+
+    def check() -> None:
+        try:
+            with sessions() as session:
+                invoices.sync(session, session.get(Invoice, invoice_id), paypal)
+                session.commit()
+        except BaseException as error:  # noqa: BLE001
+            problems.append(error)
+
+    workers = [threading.Thread(target=check) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(40)
+
+    assert not problems, problems
+    with sessions() as session:
+        stored = session.get(Invoice, invoice_id)
+        assert stored.status == "paid" and stored.paid_cents == gross
+        assert len(session.scalars(select(Payment).where(Payment.invoice_id == invoice_id)).all()) == 1
+        assert ledger.balance(session, ledger.CASH) == gross
+        assert audit.verify(session)["ok"] is True

@@ -35,6 +35,12 @@ So many late payers only need a good reminder at the right time, while others re
 - **Bank transfers.** The owner can record money paid outside PayPal.
 - **Reliable customers get time.** Someone who always pays is not chased on day one.
 
+### Two languages, and made for fast work
+
+- **English and German everywhere.** Owner screens, error messages, legal checks, reasons and the audit trail follow the language switch. Invoices, PDFs, reminders and the customer page use the customer's language. Money and dates use the right local format.
+- **Designed with usability and industrial engineering methods:** a "Next steps" work queue, one approval at a time, a four-step invoice flow, error-proofing, a PayPal status light, and measured time to get paid. See [docs/USABILITY.md](docs/USABILITY.md), which also says what was not tested yet.
+- **Stored data uses indexes.** Lists come one page at a time, screens don't run one query per row, and PDFs load only when asked for. Tests check the query plans, and `scripts/benchmark_indexes.py` measures 20,000 invoices.
+
 ## Why the AI can't break anything
 
 The AI only proposes. Limits live in code and in the owner's settings, never in a prompt.

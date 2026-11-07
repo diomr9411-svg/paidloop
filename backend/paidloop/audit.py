@@ -46,10 +46,12 @@ def record(session: Session, actor: str, action: str, invoice_id: int | None = N
 def verify(session: Session) -> dict[str, object]:
     prev_hash = GENESIS
     count = 0
-    for event in session.scalars(select(AuditEvent).order_by(AuditEvent.id)):
-        expected = _digest(prev_hash, event.at, event.actor, event.action, event.invoice_id, event.data)
-        if event.prev_hash != prev_hash or event.hash != expected:
-            return {"ok": False, "broken_at": event.id, "checked": count}
-        prev_hash = event.hash
+    columns = (AuditEvent.id, AuditEvent.at, AuditEvent.actor, AuditEvent.action, AuditEvent.invoice_id,
+               AuditEvent.data, AuditEvent.prev_hash, AuditEvent.hash)
+    for row in session.execute(select(*columns).order_by(AuditEvent.id).execution_options(yield_per=1000)):
+        expected = _digest(prev_hash, row.at, row.actor, row.action, row.invoice_id, row.data)
+        if row.prev_hash != prev_hash or row.hash != expected:
+            return {"ok": False, "broken_at": row.id, "checked": count}
+        prev_hash = row.hash
         count += 1
     return {"ok": True, "broken_at": None, "checked": count}

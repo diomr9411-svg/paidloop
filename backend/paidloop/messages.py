@@ -54,6 +54,7 @@ class Reminder:
     subject: str
     body: str
     english_for_owner: str
+    german_for_owner: str
 
 
 def _d(day: date) -> str:
@@ -72,11 +73,13 @@ def reminder(
     costs: LateCosts | None = None,
     ai_sentence: str = "",
 ) -> Reminder:
-    english = _reminder_en(action, customer_name, number, open_cents, due_date, pay_page, seller_name, costs, ai_sentence)
-    if language != "de":
-        return Reminder(english[0], english[1], english[1])
-    german = _reminder_de(action, customer_name, number, open_cents, due_date, pay_page, seller_name, costs, ai_sentence)
-    return Reminder(german[0], german[1], english[1])
+    # The AI's sentence is in the customer's language, so it only goes in that version.
+    english = _reminder_en(action, customer_name, number, open_cents, due_date, pay_page, seller_name, costs,
+                           ai_sentence if language != "de" else "")
+    german = _reminder_de(action, customer_name, number, open_cents, due_date, pay_page, seller_name, costs,
+                          ai_sentence if language == "de" else "")
+    chosen = german if language == "de" else english
+    return Reminder(chosen[0], chosen[1], english[1], german[1])
 
 
 def _reminder_de(action, name, number, open_cents, due, page, seller, costs, sentence) -> tuple[str, str]:

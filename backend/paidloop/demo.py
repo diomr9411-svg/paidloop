@@ -74,12 +74,12 @@ def reset(session: Session, paypal, buyer_email: str, public_base: str) -> None:
     invoices.sync(session, paid, paypal)
 
     _issue(session, paypal, bakery,
-           [LineInput("Oven connection repair", 2500, "HUR", 7000, 1900), LineInput("Material", 1000, "H87", 8990, 1900)],
+           [LineInput("Reparatur Ofenanschluss", 2500, "HUR", 7000, 1900), LineInput("Material", 1000, "H87", 8990, 1900)],
            5, 14, True, public_base)
     _issue(session, paypal, cafe,
-           [LineInput("Kitchen lights replaced", 6000, "HUR", 6500, 1900), LineInput("LED panels", 4000, "H87", 8900, 1900)],
+           [LineInput("Küchenbeleuchtung erneuert", 6000, "HUR", 6500, 1900), LineInput("LED-Panels", 4000, "H87", 8900, 1900)],
            20, 14, True, public_base)
     _issue(session, paypal, private,
-           [LineInput("Bathroom wiring repair", 4000, "HUR", 6500, 1900), LineInput("Material", 1000, "H87", 12000, 1900)],
+           [LineInput("Reparatur Elektrik im Bad", 4000, "HUR", 6500, 1900), LineInput("Material", 1000, "H87", 12000, 1900)],
            16, 14, True, public_base)
     session.flush()

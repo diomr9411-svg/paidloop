@@ -8,11 +8,12 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from paidloop import audit, compliance, einvoice, ledger
 from paidloop.compliance import CheckResult, InvoiceFacts, Line, Party, vat_groups
+from paidloop.i18n import LocalizedError, Text
 from paidloop.models import (
     CANCELLED,
     CHECKED,
@@ -34,7 +35,7 @@ from paidloop.paypal import InvoiceState, PaymentRequest, PayPalError, RequestLi
 _issue_lock = threading.Lock()
 
 
-class InvoiceError(Exception):
+class InvoiceError(LocalizedError):
     """A problem the owner can understand and fix."""
 
 
@@ -88,6 +89,7 @@ def facts_for(invoice: Invoice, business: Business) -> InvoiceFacts:
         lines=tuple(Line(l.description, l.quantity_milli, l.unit_price_cents, l.vat_bp, l.net_cents) for l in invoice.lines),
         vat_cents=invoice.vat_cents,
         gross_cents=invoice.gross_cents,
+        buyer_language=customer.language if customer else "de",
     )
 
 
@@ -129,7 +131,8 @@ def save_draft(
         invoice = Invoice(status=DRAFT, source_text=source_text, capture_source=capture_source)
         session.add(invoice)
     elif invoice.status not in {DRAFT, CHECKED}:
-        raise InvoiceError("An issued invoice can't be changed. Cancel it and create a new one.")
+        raise InvoiceError(Text("An issued invoice can't be changed. Cancel it and create a new one.",
+                                "Eine ausgestellte Rechnung kann nicht geändert werden. Stornieren Sie sie und erstellen Sie eine neue."))
     invoice.status = DRAFT
     invoice.customer = session.get(Customer, customer_id) if customer_id else None
     business = business_of(session)
@@ -155,7 +158,7 @@ def save_draft(
 
 def run_check(session: Session, invoice: Invoice) -> CheckResult:
     if invoice.status not in {DRAFT, CHECKED}:
-        raise InvoiceError("Only drafts are checked.")
+        raise InvoiceError(Text("Only drafts are checked.", "Nur Entwürfe werden geprüft."))
     business = business_of(session)
     result = compliance.check(facts_for(invoice, business))
     invoice.status = CHECKED if result.can_issue else DRAFT
@@ -188,7 +191,9 @@ def _request_lines(invoice: Invoice) -> tuple[RequestLine, ...]:
     groups = vat_groups([Line(l.description, l.quantity_milli, l.unit_price_cents, l.vat_bp, l.net_cents) for l in invoice.lines])
     return tuple(
         RequestLine(
-            name=f"Rechnung {invoice.number}" + (f" ({Decimal(bp) / 100:.0f}% USt.)" if bp else ""),
+            name=(f"Invoice {invoice.number}" + (f" ({Decimal(bp) / 100:.0f}% VAT)" if bp else ""))
+            if invoice.customer and invoice.customer.language == "en"
+            else (f"Rechnung {invoice.number}" + (f" ({Decimal(bp) / 100:.0f}% USt.)" if bp else "")),
             quantity="1",
             unit_price_cents=net,
             vat_percent=f"{Decimal(bp) / 100:f}".rstrip("0").rstrip(".") if bp else None,
@@ -205,13 +210,14 @@ def issue(session: Session, invoice: Invoice, paypal, public_base: str) -> Invoi
     with _issue_lock:
         session.refresh(invoice)
         if invoice.status != CHECKED:
-            raise InvoiceError("Run the check first. Only a checked invoice can be issued.")
+            raise InvoiceError(Text("Run the check first. Only a checked invoice can be issued.",
+                                    "Bitte zuerst prüfen. Nur eine geprüfte Rechnung kann ausgestellt werden."))
         business = business_of(session)
         session.refresh(business)
         result = compliance.check(facts_for(invoice, business))
         if not result.can_issue:
             invoice.status = DRAFT
-            raise InvoiceError("The invoice no longer passes the check.")
+            raise InvoiceError(Text("The invoice no longer passes the check.", "Die Rechnung besteht die Prüfung nicht mehr."))
 
         year = invoice.issue_date.year
         number = f"{business.invoice_prefix}-{year}-{business.next_number:04d}"
@@ -222,7 +228,8 @@ def issue(session: Session, invoice: Invoice, paypal, public_base: str) -> Invoi
         try:
             einvoice.create(facts, number, units, result.notes_to_print, None)
         except einvoice.EInvoiceInvalid as error:
-            raise InvoiceError(f"The e-invoice failed the official rules: {error}") from error
+            raise InvoiceError(Text(f"The e-invoice failed the official rules: {error}",
+                                    f"Die E-Rechnung hat die offiziellen Regeln nicht bestanden: {error}")) from error
 
         invoice.number = number
         invoice.public_token = secrets.token_urlsafe(24)
@@ -232,7 +239,10 @@ def issue(session: Session, invoice: Invoice, paypal, public_base: str) -> Invoi
             number=paypal_number,
             issue_date=invoice.issue_date,
             due_date=invoice.due_date,
-            note=f"Zahlungsaufforderung zu Rechnung {number}. Die Rechnung selbst erhalten Sie als E-Rechnung (ZUGFeRD). "
+            note=f"Payment request for invoice {number}. You receive the invoice itself as an e-invoice (ZUGFeRD). "
+            f"This is not a second invoice."
+            if customer.language == "en"
+            else f"Zahlungsaufforderung zu Rechnung {number}. Die Rechnung selbst erhalten Sie als E-Rechnung (ZUGFeRD). "
             f"Dies ist keine zweite Rechnung.",
             recipient_name=customer.name,
             recipient_email=customer.email,
@@ -246,7 +256,8 @@ def issue(session: Session, invoice: Invoice, paypal, public_base: str) -> Invoi
             state = paypal.get(paypal_id)
             if state.due_cents != invoice.gross_cents:
                 raise InvoiceError(
-                    f"PayPal calculated {state.due_cents} cents but the invoice says {invoice.gross_cents}. Nothing was issued."
+                    Text(f"PayPal calculated {state.due_cents} cents but the invoice says {invoice.gross_cents}. Nothing was issued.",
+                         f"PayPal hat {state.due_cents} Cent berechnet, die Rechnung nennt {invoice.gross_cents}. Es wurde nichts ausgestellt.")
                 )
             try:
                 qr = paypal.qr_code(paypal_id)
@@ -258,7 +269,8 @@ def issue(session: Session, invoice: Invoice, paypal, public_base: str) -> Invoi
                 _try_cancel(paypal, paypal_id)
             if isinstance(error, InvoiceError):
                 raise
-            raise InvoiceError(f"Issuing failed, nothing was issued: {error}") from error
+            raise InvoiceError(Text(f"Issuing failed, nothing was issued: {error}",
+                                    f"Das Ausstellen ist fehlgeschlagen, es wurde nichts ausgestellt: {error}")) from error
 
         invoice.paypal_id = paypal_id
         invoice.paypal_number = paypal_number
@@ -350,15 +362,25 @@ def sync(session: Session, invoice: Invoice, paypal) -> int:
     if invoice.status not in OPEN_STATES or not invoice.paypal_id:
         return 0
     on = today(session)
-    new_cents = apply_state(session, invoice, paypal.get(invoice.paypal_id), on)
-    for plan in invoice.plans:
-        if plan.status not in {"active", "done"}:
-            continue
-        for installment in plan.installments:
-            if installment.paypal_id:
-                state = paypal.get(installment.paypal_id)
-                new_cents += apply_state(session, invoice, state, on)
-                installment.paid_cents = state.paid_cents
+    # Ask PayPal first, so no database lock is held during the slow network calls.
+    main_state = paypal.get(invoice.paypal_id)
+    plan_states = [
+        (installment, paypal.get(installment.paypal_id))
+        for plan in invoice.plans
+        if plan.status in {"active", "done"}
+        for installment in plan.installments
+        if installment.paypal_id
+    ]
+    # The background check, the customer page and a webhook can all run at once. Taking the write
+    # lock and then reading fresh numbers means a payment is never lost or counted twice.
+    session.execute(text("INSERT OR REPLACE INTO app_state (key, value) VALUES ('sync_lock', '1')"))
+    session.refresh(invoice)
+    if invoice.status not in OPEN_STATES:
+        return 0
+    new_cents = apply_state(session, invoice, main_state, on)
+    for installment, state in plan_states:
+        new_cents += apply_state(session, invoice, state, on)
+        installment.paid_cents = state.paid_cents
     if invoice.gross_cents and invoice.paid_cents >= invoice.gross_cents:
         close_as_paid(session, invoice, on)
     return new_cents
@@ -383,9 +405,9 @@ def cancel(session: Session, invoice: Invoice, paypal, reason: str) -> None:
     Simply removing an invoice is not allowed in Germany, and VAT shown on it could still be owed.
     """
     if invoice.status not in OPEN_STATES:
-        raise InvoiceError("Only open invoices can be cancelled.")
+        raise InvoiceError(Text("Only open invoices can be cancelled.", "Nur offene Rechnungen können storniert werden."))
     if invoice.paid_cents:
-        raise InvoiceError("This invoice has payments. Refund them first.")
+        raise InvoiceError(Text("This invoice has payments. Refund them first.", "Diese Rechnung hat Zahlungen. Erstatten Sie diese zuerst."))
     with _issue_lock:
         session.refresh(invoice)
         business = business_of(session)
@@ -393,12 +415,17 @@ def cancel(session: Session, invoice: Invoice, paypal, reason: str) -> None:
         on = today(session)
         number = f"{business.invoice_prefix}-{on.year}-{business.next_number:04d}"
         facts = replace(facts_for(invoice, business), issue_date=on)
-        notes = [f"Stornorechnung zu Rechnung {invoice.number} vom {invoice.issue_date:%d.%m.%Y}."]
+        notes = [
+            f"Credit note for invoice {invoice.number} of {invoice.issue_date:%d.%m.%Y}."
+            if invoice.customer.language == "en"
+            else f"Stornorechnung zu Rechnung {invoice.number} vom {invoice.issue_date:%d.%m.%Y}."
+        ]
         try:
             credit = einvoice.create(facts, number, tuple(line.unit for line in invoice.lines), notes, None,
                                      corrects=(invoice.number, invoice.issue_date))
         except einvoice.EInvoiceInvalid as error:
-            raise InvoiceError(f"The credit note failed the official rules: {error}") from error
+            raise InvoiceError(Text(f"The credit note failed the official rules: {error}",
+                                    f"Die Stornorechnung hat die offiziellen Regeln nicht bestanden: {error}")) from error
         invoice.credit_note_number = number
         invoice.credit_note_xml = credit.xml
         invoice.credit_note_pdf = credit.pdf
@@ -428,10 +455,19 @@ def _cancel_records(session: Session, invoice: Invoice, business: Business, payp
 
 def resume_after_dispute(session: Session, invoice: Invoice) -> None:
     if invoice.status != DISPUTED:
-        raise InvoiceError("This invoice is not disputed.")
+        raise InvoiceError(Text("This invoice is not disputed.", "Diese Rechnung ist nicht strittig."))
     invoice.move_to("on_plan" if invoice.active_plan else ISSUED)
     invoice.paused_until = None
     audit.record(session, "owner", "dispute_closed", invoice.id)
+
+
+def delete_draft(session: Session, invoice: Invoice) -> None:
+    """Drafts have no number yet, so removing one leaves no gap. Issued invoices can only be cancelled."""
+    if invoice.status not in {DRAFT, CHECKED} or invoice.number:
+        raise InvoiceError(Text("Only drafts can be deleted. Issued invoices stay on record and are cancelled instead.",
+                                "Nur Entwürfe können gelöscht werden. Ausgestellte Rechnungen bleiben erhalten und werden storniert."))
+    audit.record(session, "owner", "draft_deleted", invoice.id)
+    session.delete(invoice)
 
 
 def days_overdue(invoice: Invoice, on: date) -> int:
