@@ -73,6 +73,15 @@ export class Db {
     this.raw.pragma("optimize");
   }
 
+  /** Remove every table and make them again, empty. Used by the demo reset. */
+  dropAll(): void {
+    this.raw.pragma("foreign_keys = OFF");
+    for (const table of Object.keys(TABLES)) this.raw.exec(`DROP TABLE IF EXISTS "${table}"`);
+    this.raw.pragma("foreign_keys = ON");
+    this.statements.clear();
+    this.prepare();
+  }
+
   private defaultSql(column: Column): string {
     const value = column.default;
     if (value === undefined || value === "now") return column.nullable ? "" : column.type === "int" || column.type === "bool" ? " DEFAULT 0" : " DEFAULT ''";
