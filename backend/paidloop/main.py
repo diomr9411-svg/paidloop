@@ -266,6 +266,12 @@ def check_json(result, language: str = "en") -> dict:
     }
 
 
+def starts_with(column, text: str):
+    """Prefix search as an index range. A "contains" search would read every row, and a LIKE search
+    can't use an ordinary index in SQLite, so a range is both exact and fast."""
+    return and_(column >= text, column < text + "􏿿")
+
+
 def find_customer(session: Session, name: str) -> Customer | None:
     """Same name first, using the index. Then a customer whose name has every word."""
     key = name_key(name)
@@ -274,6 +280,8 @@ def find_customer(session: Session, name: str) -> Customer | None:
     exact = session.scalar(select(Customer).where(Customer.name_key == key).order_by(Customer.id).limit(1))
     if exact:
         return exact
+    # The words of one extracted name can sit anywhere in a saved name. This looks at one small table
+    # for one row, and only when the exact name was not found by its index above.
     query = select(Customer).order_by(Customer.name_key).limit(1)
     for word in key.split():
         query = query.where(Customer.name_key.contains(word, autoescape=True))
@@ -476,7 +484,7 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
     ) -> list[dict]:
         query = select(Customer).order_by(Customer.name_key).limit(limit)
         if q.strip():
-            query = query.where(Customer.name_key.contains(name_key(q), autoescape=True))
+            query = query.where(starts_with(Customer.name_key, name_key(q)))
         return [customer_json(c) for c in session.scalars(query)]
 
     @app.post("/api/customers")
@@ -576,8 +584,8 @@ def create_app(settings: Settings | None = None, paypal=None, ai: AI | None = No
             conditions.append(condition)
         text = q.strip()
         if text:
-            matching = select(Customer.id).where(Customer.name_key.contains(name_key(text), autoescape=True))
-            conditions.append(or_(Invoice.number.contains(text, autoescape=True), Invoice.customer_id.in_(matching)))
+            matching = select(Customer.id).where(starts_with(Customer.name_key, name_key(text)))
+            conditions.append(or_(starts_with(Invoice.number, text.upper()), Invoice.customer_id.in_(matching)))
 
         total = session.scalar(select(func.count(Invoice.id)).where(*conditions))
         column = {"newest": Invoice.id, "number": Invoice.number, "customer": Customer.name_key,

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "../api";
-import { Empty, ErrorBox, Loading, StatusPill } from "../components";
+import { Empty, ErrorBox, Loading, PageHeader, Rereading, StatusPill } from "../components";
 import { Key, useT } from "../i18n";
 
 const FILTERS: [string, Key][] = [
@@ -16,6 +16,14 @@ const FILTERS: [string, Key][] = [
 ];
 
 type View = { filter: string; q: string; sort: string; dir: string; page: number };
+
+const SORTS: [string, Key][] = [
+  ["newest", "sortNewest"],
+  ["number", "sortNumber"],
+  ["customer", "sortCustomer"],
+  ["due", "sortDue"],
+  ["amount", "sortAmount"],
+];
 
 const START: View = { filter: "all", q: "", sort: "newest", dir: "desc", page: 1 };
 
@@ -67,6 +75,8 @@ export function Invoices({ version }: { version: number }) {
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const latest = useRef(0);
+  const [fetching, setFetching] = useState(false);
+  const search = useRef<HTMLInputElement>(null);
 
   const change = (update: Partial<View>) => setView((current) => ({ ...current, ...update }));
 
@@ -92,6 +102,7 @@ export function Invoices({ version }: { version: number }) {
     const query = viewQuery(view);
     window.history.replaceState(null, "", `#/invoices${query ? `?${query}` : ""}`);
     const ticket = ++latest.current;
+    setFetching(true);
     const params = new URLSearchParams({ filter: view.filter, sort: view.sort, dir: view.dir, page: String(view.page), size: "25" });
     if (view.q) params.set("q", view.q);
     api(`/api/invoices?${params}`)
@@ -100,11 +111,24 @@ export function Invoices({ version }: { version: number }) {
         setData(body);
         setError("");
       })
-      .catch((e) => ticket === latest.current && setError(e.message));
+      .catch((e) => ticket === latest.current && setError(e.message))
+      .finally(() => ticket === latest.current && setFetching(false));
   }, [view, version, attempt]);
 
+  // Typing "/" anywhere on the page jumps to the search box, unless a field already has focus.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return;
+      if ((event.target as HTMLElement).closest("input, textarea, select, dialog")) return;
+      event.preventDefault();
+      search.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   if (error && !data) return <ErrorBox text={error} onRetry={() => setAttempt((a) => a + 1)} />;
-  if (!data) return <Loading />;
+  if (!data) return <Loading shape="list" title={t("invoices")} />;
 
   const from = data.total === 0 ? 0 : (data.page - 1) * data.size + 1;
   const to = Math.min(data.page * data.size, data.total);
@@ -112,12 +136,14 @@ export function Invoices({ version }: { version: number }) {
 
   return (
     <>
-      <div className="title-row">
-        <h1>{t("invoices")}</h1>
-        <a className="button primary" href="#/new">
-          {t("newInvoice")}
-        </a>
-      </div>
+      <PageHeader
+        title={t("invoices")}
+        actions={
+          <a className="button primary" href="#/new">
+            {t("newInvoice")}
+          </a>
+        }
+      />
       {error && <ErrorBox text={error} />}
 
       <div className="list-tools">
@@ -129,7 +155,24 @@ export function Invoices({ version }: { version: number }) {
           ))}
         </div>
         <div className="search">
+          <label className="sort-select">
+            <span className="sr-only">{t("sortLabel")}</span>
+            <select
+              value={`${view.sort}:${view.dir}`}
+              onChange={(event) => {
+                const [sort, dir] = event.target.value.split(":");
+                change({ sort, dir, page: 1 });
+              }}
+            >
+              {SORTS.map(([name, key]) => (
+                <option key={`${name}:desc`} value={`${name}:${name === "newest" ? "desc" : "asc"}`}>
+                  {t("sortLabel")}: {t(key)}
+                </option>
+              ))}
+            </select>
+          </label>
           <input
+            ref={search}
             type="search"
             aria-label={t("searchInvoices")}
             placeholder={t("searchInvoices")}
@@ -140,6 +183,7 @@ export function Invoices({ version }: { version: number }) {
         </div>
       </div>
 
+      <Rereading active={fetching}>
       {data.items.length === 0 ? (
         <div className="card">
           <Empty
@@ -165,7 +209,7 @@ export function Invoices({ version }: { version: number }) {
       ) : (
         <>
           <div className="card table-card">
-            <table className="clickable">
+            <table className="clickable rtable sortable">
               <thead>
                 <tr>
                   <SortHeader name="number" label={t("number")} view={view} change={change} />
@@ -184,7 +228,7 @@ export function Invoices({ version }: { version: number }) {
                   const href = draft ? `#/new?draft=${row.id}` : `#/invoices/${row.id}`;
                   return (
                     <tr key={row.id} onClick={() => (window.location.hash = href)}>
-                      <td>
+                      <td className="lead" data-label={t("number")}>
                         <a href={href} onClick={(event) => event.stopPropagation()}>
                           {row.number || t("draftNumber", { id: row.id })}
                         </a>
@@ -194,13 +238,19 @@ export function Invoices({ version }: { version: number }) {
                           </span>
                         )}
                       </td>
-                      <td>{row.customer?.name || "-"}</td>
-                      <td className="nowrap">{day(row.due_date)}</td>
-                      <td>
+                      <td data-label={t("customer")}>{row.customer?.name || "-"}</td>
+                      <td className="nowrap" data-label={t("due")}>
+                        {day(row.due_date)}
+                      </td>
+                      <td data-label={t("status")}>
                         <StatusPill status={row.status} overdue={row.days_overdue} />
                       </td>
-                      <td className="num">{eur(row.gross_cents)}</td>
-                      <td className="num">{eur(row.open_cents)}</td>
+                      <td className="num" data-label={t("total")}>
+                        {eur(row.gross_cents)}
+                      </td>
+                      <td className="num" data-label={t("open")}>
+                        {eur(row.open_cents)}
+                      </td>
                     </tr>
                   );
                 })}
@@ -222,6 +272,7 @@ export function Invoices({ version }: { version: number }) {
           </nav>
         </>
       )}
+      </Rereading>
     </>
   );
 }

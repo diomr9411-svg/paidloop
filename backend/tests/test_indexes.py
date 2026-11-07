@@ -72,6 +72,16 @@ def test_results_on_home_are_read_from_the_index_alone(engine):
     assert "COVERING INDEX ix_invoice_timed" in timed, timed
 
 
+def test_search_is_a_prefix_range_on_an_index(engine):
+    with engine.connect() as connection:
+        by_name = plan_of(connection, "SELECT id FROM customer WHERE name_key >= 'kun' AND name_key < 'kun' || char(1114111)")
+        by_number = plan_of(connection, "SELECT id FROM invoice WHERE number >= 'RE-2026-001' AND number < 'RE-2026-001' || char(1114111)")
+        inside = plan_of(connection, "SELECT id FROM customer WHERE name_key LIKE '%kun%'")
+    assert "SEARCH" in by_name and "ix_customer_name_key" in by_name, by_name
+    assert "SEARCH" in by_number, by_number
+    assert "SCAN" in inside, inside  # what the old search did
+
+
 def test_balances_are_read_from_the_index_alone(engine):
     with engine.connect() as connection:
         plan = plan_of(connection, "SELECT sum(debit_cents), sum(credit_cents) FROM journal_line WHERE account = 'cash'")
@@ -203,7 +213,8 @@ def test_invoice_list_pages_filters_and_counts(client):
 
 def test_invoice_search_finds_number_and_customer_and_treats_wildcards_as_text(client):
     fill(client.app, 30)
-    assert client.get("/api/invoices?q=00011").json()["total"] == 1
+    assert client.get("/api/invoices?q=RE-2026-00011").json()["total"] == 1
+    assert client.get("/api/invoices?q=re-2026-0001").json()["total"] == 8  # lower case works; 00010 to 00019 minus two drafts, which have no number
     by_name = client.get("/api/invoices", params={"q": "kunde 7 gmbh"}).json()
     assert by_name["total"] == 1 and by_name["items"][0]["customer"]["name"] == "Kunde 7 GmbH"
     assert client.get("/api/invoices", params={"q": "%"}).json()["total"] == 0
@@ -267,7 +278,8 @@ def test_same_customer_typed_twice_is_one_customer(client):
     # The same name with a different email can be a different firm, so it stays separate.
     other = client.post("/api/customers", json={"name": "Bäckerei Muster GmbH", "email": "b@example.com"}).json()
     assert other["id"] != one["id"]
-    assert len(client.get("/api/customers", params={"q": "muster"}).json()) == 2
+    assert len(client.get("/api/customers", params={"q": "bäckerei"}).json()) == 2
+    assert client.get("/api/customers", params={"q": "muster"}).json() == []  # search is by the start of the name
     assert client.get("/api/customers", params={"q": "%"}).json() == []
 
 

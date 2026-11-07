@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api } from "../api";
 import { RunAgentButton } from "../App";
-import { BarRows, Empty, ErrorBox, Loading } from "../components";
+import { BarRows, Empty, ErrorBox, Loading, PageHeader } from "../components";
 import { useT } from "../i18n";
 
 function Tile({ label, value, note, tone, href }: { label: string; value: string; note: string; tone?: string; href?: string }) {
@@ -89,18 +89,20 @@ export function Dashboard({ version, refresh }: { version: number; refresh: () =
   }, [version, attempt]);
 
   if (error && !view) return <ErrorBox text={error} onRetry={() => setAttempt((a) => a + 1)} />;
-  if (!view) return <Loading />;
+  if (!view) return <Loading shape="dashboard" title={t("homeTitle")} />;
 
   const empty = view.open_count === 0 && view.paid_count === 0 && view.queue.length === 0;
   const results = view.performance;
   return (
     <>
-      <div className="title-row">
-        <h1>{t("homeTitle")}</h1>
-        <a className="button primary" href="#/new">
-          {t("newInvoice")}
-        </a>
-      </div>
+      <PageHeader
+        title={t("homeTitle")}
+        actions={
+          <a className="button primary" href="#/new">
+            {t("newInvoice")}
+          </a>
+        }
+      />
       {error && <ErrorBox text={error} />}
       {empty && (
         <div className="card callout">
@@ -189,7 +191,7 @@ export function Dashboard({ version, refresh }: { version: number; refresh: () =
           {view.upcoming.length === 0 ? (
             <p className="muted">{t("noOpenPayments")}</p>
           ) : (
-            <table>
+            <table className="rtable">
               <thead>
                 <tr>
                   <th scope="col">{t("expected")}</th>
@@ -202,12 +204,16 @@ export function Dashboard({ version, refresh }: { version: number; refresh: () =
               <tbody>
                 {view.upcoming.map((item: any, index: number) => (
                   <tr key={index}>
-                    <td className="nowrap">{day(item.expected_on)}</td>
-                    <td>
+                    <td className="nowrap" data-label={t("expected")}>
+                      {day(item.expected_on)}
+                    </td>
+                    <td className="lead" data-label={t("customer")}>
                       <a href={`#/invoices/${item.invoice_id}`}>{item.customer}</a>
                       {item.risk === "high" && <span className="pill warn small-pill">! {t("highRisk")}</span>}
                     </td>
-                    <td className="num">{eur(item.amount_cents)}</td>
+                    <td className="num" data-label={t("amount")}>
+                      {eur(item.amount_cents)}
+                    </td>
                   </tr>
                 ))}
               </tbody>

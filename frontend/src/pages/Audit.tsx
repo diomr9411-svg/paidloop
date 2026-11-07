@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api";
-import { ErrorBox, Loading } from "../components";
+import { ErrorBox, Loading, PageHeader } from "../components";
 import { Tools, useT } from "../i18n";
 
 const HIDDEN = new Set(["paypal_ids", "paypal_id", "paypal_payment_id", "reason_de", "issues", "error_count"]);
@@ -62,12 +62,11 @@ export function Audit({ version }: { version: number }) {
   }
 
   if (error && !events) return <ErrorBox text={error} onRetry={() => setAttempt((a) => a + 1)} />;
-  if (!events) return <Loading />;
+  if (!events) return <Loading shape="list" title={t("audit")} />;
 
   return (
     <>
-      <h1>{t("audit")}</h1>
-      <p className="muted">{t("auditIntro")}</p>
+      <PageHeader title={t("audit")} info={t("auditIntro")} />
       {chain ? (
         <div className={`alert ${chain.ok ? "good" : "error"}`} role={chain.ok ? "status" : "alert"}>
           {chain.ok ? t("chainOk", { n: chain.checked }) : t("chainBad", { n: chain.broken_at })}
@@ -79,7 +78,7 @@ export function Audit({ version }: { version: number }) {
       )}
       {error && <ErrorBox text={error} />}
       <div className="card table-card">
-        <table>
+        <table className="rtable">
           <thead>
             <tr>
               <th scope="col">{t("when")}</th>
@@ -93,14 +92,22 @@ export function Audit({ version }: { version: number }) {
           <tbody>
             {events.map((event: any) => (
               <tr key={event.id}>
-                <td className="nowrap muted">{dateTime(event.at)}</td>
-                <td>
+                <td className="nowrap muted" data-label={t("when")}>
+                  {dateTime(event.at)}
+                </td>
+                <td data-label={t("who")}>
                   <span className={`actor ${event.actor}`}>{labels.actor[event.actor] || event.actor}</span>
                 </td>
-                <td>{labels.audit[event.action] || event.action.replaceAll("_", " ")}</td>
-                <td>{event.invoice_id ? <a href={`#/invoices/${event.invoice_id}`}>{event.invoice_id}</a> : "-"}</td>
-                <td className="small muted">{eventText(event.data, tools)}</td>
-                <td className="mono small muted">{event.hash}</td>
+                <td className="lead" data-label={t("whatHappenedShort")}>
+                  {labels.audit[event.action] || event.action.replaceAll("_", " ")}
+                </td>
+                <td data-label={t("invoice")}>{event.invoice_id ? <a href={`#/invoices/${event.invoice_id}`}>{event.invoice_id}</a> : "-"}</td>
+                <td className="small muted" data-label={t("details")}>
+                  {eventText(event.data, tools)}
+                </td>
+                <td className="mono small muted" data-label={t("fingerprint")}>
+                  {event.hash}
+                </td>
               </tr>
             ))}
           </tbody>

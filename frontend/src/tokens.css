@@ -1,0 +1,224 @@
+/* Design tokens. The only place where a colour, size, duration or layer is written as a value.
+   Everything else reads these through var(). Rules: docs/UI-RULES-APPLIED.md */
+
+:root {
+  /* Palette: 23 colours and white. Status colours carry meaning only. */
+  --white: #ffffff;
+  --primary-50: #eef4ff;
+  --primary-100: #dce7ff;
+  --primary-200: #b9cfff;
+  --primary-300: #8db0ff;
+  --primary-400: #5b8bfa;
+  --primary-500: #386cf5;
+  --primary-600: #2453d6;
+  --primary-700: #1d42ad;
+  --primary-800: #1a3787;
+  --primary-900: #172e66;
+  --neutral-50: #f8f8f9;
+  --neutral-100: #f0f0f2;
+  --neutral-200: #e3e3e7;
+  --neutral-300: #cdcdd3;
+  --neutral-400: #a3a3ac;
+  --neutral-500: #75757f;
+  --neutral-600: #5d5d66;
+  --neutral-700: #45454d;
+  --neutral-800: #2c2c32;
+  --neutral-900: #18181c;
+  --success-100: #d9f5e5;
+  --success-500: #1e9e5a;
+  --success-700: #137442;
+  --warning-100: #fff1d6;
+  --warning-500: #e39a12;
+  --warning-700: #9c6200;
+  --error-100: #fde2e2;
+  --error-500: #dd3636;
+  --error-700: #a82424;
+
+  /* Roles, light. A screen names a role, never a shade. */
+  color-scheme: light;
+  --canvas: var(--neutral-50);
+  --surface: var(--white);
+  --raised: var(--white);
+  --sunken: var(--neutral-100);
+  --line: var(--neutral-200);
+  --line-strong: var(--neutral-300);
+  --text: var(--neutral-900);
+  --text-muted: var(--neutral-600);
+  --placeholder: var(--neutral-500);
+  --link: var(--primary-600);
+  --focus: var(--primary-500);
+  --primary: var(--primary-500);
+  --primary-hover: var(--primary-600);
+  --primary-pressed: var(--primary-700);
+  --on-primary: var(--white);
+  --selected-bg: var(--primary-100);
+  --selected-text: var(--primary-700);
+  --hover-bg: var(--neutral-100);
+  --bar: var(--primary-500);
+  --bar-bg: var(--neutral-200);
+  --good-bg: var(--success-100);
+  --good-text: var(--success-700);
+  --good-mark: var(--success-500);
+  --warn-bg: var(--warning-100);
+  --warn-text: var(--warning-700);
+  --warn-mark: var(--warning-500);
+  --bad-bg: var(--error-100);
+  --bad-text: var(--error-700);
+  --bad-mark: var(--error-500);
+  --info-bg: var(--primary-100);
+  --info-text: var(--primary-700);
+  --scrim: color-mix(in srgb, var(--neutral-900) 45%, transparent);
+  --toast-bg: var(--neutral-900);
+  --toast-text: var(--neutral-50);
+  --toast-error-bg: var(--error-700);
+  --toast-error-text: var(--white);
+  --changed-row: var(--primary-50);
+
+  /* Type: one family. System fonts, so nothing is requested from another site. */
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --text-2xs: 11px;
+  --line-2xs: 16px;
+  --text-xs: 12px;
+  --line-xs: 16px;
+  --text-meta: 13px;
+  --line-meta: 18px;
+  --text-sm: 14px;
+  --line-sm: 20px;
+  --text-body: 14px;
+  --line-body: 1.5;
+  --text-lg: 18px;
+  --line-lg: 28px;
+  --text-xl: 20px;
+  --line-xl: 28px;
+  --text-2xl: 24px;
+  --line-2xl: 32px;
+  --text-3xl: 30px;
+  --line-3xl: 36px;
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Spacing: one 4px rhythm, named steps. Comfortable values on a phone. */
+  --space-hair: 2px;
+  --space-tight: 4px;
+  --space-item: 8px;
+  --space-group: 12px;
+  --space-section: 16px;
+  --space-page: 24px;
+  --space-card: 12px;
+  --space-dialog: 16px;
+  --space-gutter: 8px;
+  --space-indent: 12px;
+  --size-control: 40px;
+  --size-target: 44px;
+  --size-row: 40px;
+  --size-toolbar: 28px;
+  --size-topbar: 64px;
+  --size-icon: 16px;
+  --measure-page: 1120px;
+  --measure-narrow: 560px;
+
+  /* Shape and depth */
+  --radius: 6px;
+  --radius-pill: 4px;
+  --radius-alert: 8px;
+  --radius-dialog: 12px;
+  --radius-inner: 3px;
+  --hairline: 1px;
+  --ring: 2px;
+  --elev-sm: 0 1px 2px color-mix(in srgb, var(--neutral-900) 10%, transparent);
+  --elev-md: 0 4px 16px color-mix(in srgb, var(--neutral-900) 16%, transparent);
+  --elev-floating: 0 -2px 12px color-mix(in srgb, var(--neutral-900) 10%, transparent);
+
+  /* Layers: five, and nothing above a toast */
+  --z-sticky: 10;
+  --z-nav: 20;
+  --z-dialog: 30;
+  --z-menu: 40;
+  --z-toast: 50;
+
+  /* Motion: only these speeds and these two curves */
+  --dur-instant: 0ms;
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 240ms;
+  --dur-exit: 120ms;
+  --dur-spin: 800ms; /* one turn of the loader, the only animation that repeats */
+  --ease-enter: cubic-bezier(0.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --loader-delay: 250ms;
+  --changed-hold: 1200ms;
+}
+
+/* From 640px (sm) */
+@media (min-width: 640px) {
+  :root {
+    --space-gutter: 12px;
+  }
+}
+
+/* From 1024px (lg): controls get smaller, because a mouse is more precise than a finger */
+@media (min-width: 1024px) {
+  :root {
+    --size-control: 34px;
+    --size-row: 40px;
+  }
+}
+
+/* Compact density: heights and padding change, never a font size */
+[data-density="compact"] {
+  --space-group: 8px;
+  --space-section: 12px;
+  --space-page: 16px;
+  --space-card: 8px;
+  --space-dialog: 12px;
+  --space-gutter: 8px;
+  --size-control: 30px;
+  --size-row: 32px;
+}
+
+@media (max-width: 1023px) {
+  [data-density="compact"] {
+    --size-control: 40px;
+    --size-row: 40px;
+  }
+}
+
+/* Dark theme: the same colours with their roles swapped */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: var(--neutral-900);
+  --surface: var(--neutral-800);
+  --raised: var(--neutral-700);
+  --sunken: var(--neutral-900);
+  --line: var(--neutral-700);
+  --line-strong: var(--neutral-600);
+  --text: var(--neutral-50);
+  --text-muted: var(--neutral-300);
+  --placeholder: var(--neutral-400);
+  --link: var(--primary-300);
+  --focus: var(--primary-300);
+  --primary: var(--primary-400);
+  --primary-hover: var(--primary-300);
+  --primary-pressed: var(--primary-200);
+  --on-primary: var(--neutral-900);
+  --selected-bg: var(--primary-900);
+  --selected-text: var(--primary-100);
+  --hover-bg: var(--neutral-700);
+  --bar: var(--primary-400);
+  --bar-bg: var(--neutral-700);
+  --good-bg: var(--neutral-700);
+  --good-text: var(--success-100);
+  --warn-bg: var(--neutral-700);
+  --warn-text: var(--warning-100);
+  --bad-bg: var(--neutral-700);
+  --bad-text: var(--error-100);
+  --info-bg: var(--primary-900);
+  --info-text: var(--primary-100);
+  --toast-bg: var(--neutral-50);
+  --toast-text: var(--neutral-900);
+  --changed-row: var(--primary-900);
+  --elev-floating: none;
+}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, post } from "./api";
-import { LangSwitch, ToastProvider, TwoStepButton, useToast } from "./components";
+import { AppearanceMenu, BusyLabel, LangSwitch, ToastProvider, TwoStepButton, useToast } from "./components";
 import { Key, LangProvider, useT } from "./i18n";
 import { Approvals } from "./pages/Approvals";
 import { Audit } from "./pages/Audit";
@@ -151,6 +151,7 @@ function OwnerApp({ hash }: { hash: string }) {
         <div className="top-right">
           <StatusLights health={health} />
           <LangSwitch value={lang} onChange={setLang} />
+          <AppearanceMenu />
           <button className="small help" aria-label={t("shortcutsOpen")} title={t("shortcutsOpen")} onClick={() => setHelpOpen(true)}>
             ?
           </button>
@@ -211,6 +212,7 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
     ["I", "shortcutInvoices"],
     ["A", "shortcutApprovals"],
     ["H", "shortcutHome"],
+    ["/", "shortcutSearch"],
     ["?", "shortcutHelp"],
     ["Ctrl + Enter", "shortcutSubmit"],
   ];
@@ -320,7 +322,7 @@ export function RunAgentButton({ refresh, small, disabled }: { refresh: () => vo
 
   return (
     <button className={`primary ${small ? "small" : ""}`} disabled={busy || disabled} aria-busy={busy} onClick={run}>
-      {busy ? t("agentWorking") : t("runAgent")}
+      <BusyLabel busy={busy} label={t("runAgent")} pending={t("agentWorking")} />
     </button>
   );
 }

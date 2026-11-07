@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api, ApiError, put } from "../api";
-import { ErrorBox, Field, Loading, useToast } from "../components";
+import { BusyLabel, ErrorBox, Field, Loading, PageHeader, useToast } from "../components";
 import { Key, useT } from "../i18n";
 
 export function Settings({ refresh }: { refresh: () => void }) {
@@ -24,7 +24,7 @@ export function Settings({ refresh }: { refresh: () => void }) {
   }, [attempt]);
 
   if (error && !form) return <ErrorBox text={error} onRetry={() => setAttempt((a) => a + 1)} />;
-  if (!form) return <Loading />;
+  if (!form) return <Loading shape="form" title={t("settings")} />;
 
   const change = (key: string, value: unknown) => {
     setForm({ ...form, [key]: value });
@@ -68,7 +68,7 @@ export function Settings({ refresh }: { refresh: () => void }) {
         save();
       }}
     >
-      <h1>{t("settings")}</h1>
+      <PageHeader title={t("settings")} info={t("agentLimitsHint")} />
       <section className="card">
         <h2>{t("yourBusiness")}</h2>
         <div className="form-grid">
@@ -109,7 +109,7 @@ export function Settings({ refresh }: { refresh: () => void }) {
       <div className="action-bar">
         <span />
         <button className="primary big" disabled={busy || !dirty} aria-busy={busy}>
-          {t("saveSettings")}
+          <BusyLabel busy={busy} label={t("saveSettings")} pending={t("saving")} />
         </button>
       </div>
     </form>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api, post } from "../api";
-import { Empty, ErrorBox, Field, Loading, useToast } from "../components";
+import { BusyLabel, Empty, ErrorBox, Field, Loading, PageHeader, useToast } from "../components";
 import { Key, useT } from "../i18n";
 
 const CUSTOMER_REQUEST = new Set(["plan_exception", "dispute_review", "payment_check"]);
@@ -85,7 +85,7 @@ function ApprovalCard({ item, position, total, done, later }: { item: any; posit
       {error && <ErrorBox text={error} />}
       <div className="button-row">
         <button className="primary" disabled={busy} aria-busy={busy} onClick={() => decide("approve", edited ? { body } : {})}>
-          {t(yes)}
+          <BusyLabel busy={busy} label={t(yes)} pending={t("sending")} />
         </button>
         <button disabled={busy} onClick={() => decide("reject")}>
           {t(no)}
@@ -118,7 +118,7 @@ export function Approvals({ version, refresh }: { version: number; refresh: () =
   }, [version, attempt]);
 
   if (error && !rows) return <ErrorBox text={error} onRetry={() => setAttempt((a) => a + 1)} />;
-  if (!rows) return <Loading />;
+  if (!rows) return <Loading shape="cards" title={t("approvals")} />;
 
   const currentIndex = Math.max(rows.findIndex((row) => row.id === currentId), 0);
   const current = rows[currentIndex];
@@ -126,8 +126,7 @@ export function Approvals({ version, refresh }: { version: number; refresh: () =
 
   return (
     <>
-      <h1>{t("approvals")}</h1>
-      <p className="muted">{t("approvalsIntro")}</p>
+      <PageHeader title={t("approvals")} info={t("approvalsIntro")} />
       {rows.length === 0 && (
         <div className="card">
           <Empty title={t("nothingWaiting")} hint={t("nothingWaitingHint")} />

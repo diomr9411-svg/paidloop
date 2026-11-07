@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError, api, post, setApiLanguage } from "../api";
-import { ErrorBox, LangSwitch } from "../components";
+import { ErrorBox, LangSwitch, Loading } from "../components";
 import { Key, Lang, toolsFor, useT } from "../i18n";
 
 const CHIPS: Key[] = ["chipMoreTime", "chipWrong", "chipPaid", "chipOwner"];
@@ -57,9 +57,7 @@ export function PayPage({ token }: { token: string }) {
   if (!page)
     return (
       <div className="paypage">
-        <p className="muted" role="status">
-          {t("loading")}
-        </p>
+        <Loading shape="cards" />
       </div>
     );
 

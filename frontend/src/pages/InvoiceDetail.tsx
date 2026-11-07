@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api, customerLink, del, post, toNumber } from "../api";
-import { ErrorBox, Field, Loading, StatusPill, TwoStepButton, useCopyLink, useToast } from "../components";
+import { ErrorBox, Field, Loading, PageHeader, StatusPill, TwoStepButton, useCopyLink, useToast } from "../components";
 import { useT } from "../i18n";
 import { eventText } from "./Audit";
 
@@ -57,7 +57,7 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
   }
 
   if (error && !invoice) return <ErrorBox text={error} onRetry={() => setAttempt((a) => a + 1)} />;
-  if (!invoice) return <Loading />;
+  if (!invoice) return <Loading shape="detail" title={t("allInvoices")} />;
 
   const isDraft = invoice.status === "draft" || invoice.status === "checked";
   const open = ["issued", "on_plan", "disputed"].includes(invoice.status);
@@ -74,15 +74,11 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
 
   return (
     <>
-      <div className="title-row">
-        <div>
-          <a className="muted small" href="#/invoices">
-            ← {t("allInvoices")}
-          </a>
-          <h1>{invoice.number || t("draftNumber", { id: invoice.id })}</h1>
-        </div>
-        <StatusPill status={invoice.status} overdue={invoice.days_overdue} />
-      </div>
+      <PageHeader
+        title={invoice.number || t("draftNumber", { id: invoice.id })}
+        back={{ href: "#/invoices", label: t("allInvoices") }}
+        actions={<StatusPill status={invoice.status} overdue={invoice.days_overdue} />}
+      />
       {error && <ErrorBox text={error} />}
 
       <div className={`card now ${invoice.has_pending || late ? "attention" : ""}`}>
@@ -123,7 +119,7 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
         </div>
       </div>
 
-      <div className="columns wide-left">
+      <div className="stack">
         <section className="card">
           <h2>{invoice.customer?.name}</h2>
           <p className="muted">
@@ -131,7 +127,7 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
             {invoice.customer?.city ? `, ${invoice.customer.city}` : ""}
             {invoice.customer ? ` · ${invoice.customer.language === "en" ? t("langEnglish") : t("langGerman")}` : ""}
           </p>
-          <table>
+          <table className="rtable">
             <thead>
               <tr>
                 <th scope="col">{t("item")}</th>
@@ -149,12 +145,18 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
             <tbody>
               {invoice.lines.map((line: any, index: number) => (
                 <tr key={index}>
-                  <td>{line.description}</td>
-                  <td className="num">
+                  <td className="lead" data-label={t("item")}>
+                    {line.description}
+                  </td>
+                  <td className="num" data-label={t("qty")}>
                     {new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-GB").format(line.quantity)} {line.unit === "HUR" ? t("unitHours") : ""}
                   </td>
-                  <td className="num">{eur(line.unit_price_cents)}</td>
-                  <td className="num">{eur(line.net_cents)}</td>
+                  <td className="num" data-label={t("price")}>
+                    {eur(line.unit_price_cents)}
+                  </td>
+                  <td className="num" data-label={t("net")}>
+                    {eur(line.net_cents)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -261,7 +263,7 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
           {invoice.plan && (
             <div className="card">
               <h2>{t("paymentPlan")}</h2>
-              <table>
+              <table className="rtable">
                 <thead>
                   <tr>
                     <th scope="col">#</th>
@@ -275,10 +277,16 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
                 <tbody>
                   {invoice.plan.installments.map((item: any) => (
                     <tr key={item.seq}>
-                      <td>{item.seq}</td>
-                      <td className="nowrap">{day(item.due_date)}</td>
-                      <td className="num">{eur(item.amount_cents)}</td>
-                      <td>{item.is_paid ? t("planPaid") : t("planOpen")}</td>
+                      <td className="lead" data-label="#">
+                        {item.seq}
+                      </td>
+                      <td className="nowrap" data-label={t("due")}>
+                        {day(item.due_date)}
+                      </td>
+                      <td className="num" data-label={t("amount")}>
+                        {eur(item.amount_cents)}
+                      </td>
+                      <td data-label={t("status")}>{item.is_paid ? t("planPaid") : t("planOpen")}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -353,16 +361,22 @@ export function InvoiceDetail({ id, version, refresh }: { id: number; version: n
           <p className="muted">{t("nothingYet")}</p>
         ) : (
           <div className="table-scroll">
-            <table>
+            <table className="rtable">
               <tbody>
                 {events.map((event) => (
                   <tr key={event.id}>
-                    <td className="nowrap muted">{dateTime(event.at)}</td>
-                    <td>
+                    <td className="nowrap muted" data-label={t("when")}>
+                      {dateTime(event.at)}
+                    </td>
+                    <td data-label={t("who")}>
                       <span className={`actor ${event.actor}`}>{labels.actor[event.actor] || event.actor}</span>
                     </td>
-                    <td>{labels.audit[event.action] || event.action.replaceAll("_", " ")}</td>
-                    <td className="muted small">{eventText(event.data, tools)}</td>
+                    <td className="lead" data-label={t("whatHappenedShort")}>
+                      {labels.audit[event.action] || event.action.replaceAll("_", " ")}
+                    </td>
+                    <td className="muted small" data-label={t("details")}>
+                      {eventText(event.data, tools)}
+                    </td>
                   </tr>
                 ))}
               </tbody>

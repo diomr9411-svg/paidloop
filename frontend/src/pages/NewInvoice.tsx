@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { addDays, api, customerLink, lineNetCents, numberText, post, put, toNumber, totals } from "../api";
-import { Empty, ErrorBox, Field, useCopyLink } from "../components";
+import { BusyLabel, Empty, ErrorBox, Field, PageHeader, useCopyLink } from "../components";
 import { useT } from "../i18n";
 
 type Line = { description: string; quantity: string; unit: string; price: string; vat: string };
@@ -405,14 +405,16 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
 
   return (
     <>
-      <div className="title-row">
-        <h1>{t("newInvoice")}</h1>
-        {step !== "note" && step !== "done" && (
-          <button className="link" onClick={startOver}>
-            {t("startOver")}
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title={t("newInvoice")}
+        actions={
+          step !== "note" && step !== "done" ? (
+            <button className="link" onClick={startOver}>
+              {t("startOver")}
+            </button>
+          ) : undefined
+        }
+      />
 
       <ol className="stepper" aria-label={t("stepsLabel")}>
         {STEPS.map((name, index) => {
@@ -478,7 +480,7 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
           />
           <div className="button-row">
             <button className="primary big" disabled={reading} aria-busy={reading} onClick={read}>
-              {reading ? t("reading") : t("readNote")}
+              <BusyLabel busy={reading} label={t("readNote")} pending={t("reading")} />
             </button>
             <button disabled={reading} onClick={() => fileInput.current?.click()}>
               {t("uploadFile")}
@@ -762,7 +764,7 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
               </span>
             </div>
             <button className="primary big" disabled={busy || lines.length === 0} aria-busy={busy} onClick={saveAndCheck}>
-              {busy ? t("checking") : t("checkInvoice")}
+              <BusyLabel busy={busy} label={t("checkInvoice")} pending={t("checking")} />
             </button>
           </div>
         </div>
@@ -842,7 +844,7 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
             <button onClick={() => setStep("details")}>{t("back")}</button>
             {check.can_issue ? (
               <button className="primary big" disabled={busy} aria-busy={busy} onClick={issue}>
-                {busy ? t("issuing") : t("issueInvoice")}
+                <BusyLabel busy={busy} label={t("issueInvoice")} pending={t("issuing")} />
               </button>
             ) : (
               <>
