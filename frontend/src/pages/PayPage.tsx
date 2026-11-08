@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError, api, post, setApiLanguage } from "../api";
-import { ErrorBox, LangSwitch, Loading } from "../components";
 import { Key, Lang, toolsFor, useT } from "../i18n";
+import { Alert, ErrorBox } from "../ui/Alert";
+import { Badge } from "../ui/Badge";
+import { Button, ButtonLink } from "../ui/Button";
+import { Card, SectionCard } from "../ui/Card";
+import { EmptyState } from "../ui/EmptyState";
+import { Icon, IconTile, InitialsTile } from "../ui/Icon";
+import { Loading } from "../ui/Loading";
+import { Page } from "../ui/PageHeader";
+import { LangSwitch } from "../widgets/LangSwitch";
 
 const CHIPS: Key[] = ["chipMoreTime", "chipWrong", "chipPaid", "chipOwner"];
 
@@ -50,15 +58,17 @@ export function PayPage({ token }: { token: string }) {
 
   if (notFound)
     return (
-      <div className="paypage">
-        <div className="card">{t("linkInvalid")}</div>
-      </div>
+      <main className="paypage">
+        <Card>
+          <EmptyState icon="link" tone="warn" heading title={t("linkInvalid")} hint={t("linkInvalidHint")} />
+        </Card>
+      </main>
     );
   if (!page)
     return (
-      <div className="paypage">
+      <main className="paypage">
         <Loading shape="cards" />
-      </div>
+      </main>
     );
 
   const closed = page.status === "paid" || page.status === "cancelled";
@@ -109,142 +119,180 @@ export function PayPage({ token }: { token: string }) {
   }
 
   return (
-    <div className="paypage" lang={language}>
-      <section className="card pay-head">
+    <main className="paypage" lang={language}>
+      <Page template="customer">
         <div className="pay-top">
-          <div className="muted">
-            {t("invoiceFrom")} {page.seller}
+          <div className="pay-seller">
+            <InitialsTile name={page.seller} />
+            <div>
+              <span className="eyebrow">{t("invoiceFrom")}</span>
+              <strong>{page.seller}</strong>
+            </div>
           </div>
           <LangSwitch value={language} onChange={setChosen} />
         </div>
-        <h1>{page.number}</h1>
 
-        {page.status === "paid" && (
-          <div className="alert good" role="status">
-            ✓ {t("payPaid")}
+        <section className="card pay-head" aria-labelledby="pay-title">
+          <div className="pay-title-row">
+            <h1 id="pay-title">{page.number}</h1>
+            {page.status === "paid" && (
+              <Badge tone="good" icon="circle-check">
+                {t("payDone")}
+              </Badge>
+            )}
           </div>
+
+          {page.status === "paid" && (
+            <Alert tone="good" role="status">
+              {t("payPaid")}
+            </Alert>
+          )}
+          {page.status === "cancelled" && (
+            <Alert icon="ban" role="status">
+              {t("payCancelled")}
+            </Alert>
+          )}
+          {page.status === "disputed" && (
+            <Alert tone="warn" icon="circle-pause" role="status">
+              {t("payHold")}
+            </Alert>
+          )}
+
+          {!closed && (
+            <div className="pay-amount">
+              <span className="stat-label">{t("amountOpen")}</span>
+              <p className="hero-value">{money(page.open_cents)}</p>
+              <span className="pay-due">
+                <Icon name="calendar" size="sm" />
+                {t("dueOn")}: {day(page.due_date)}
+              </span>
+            </div>
+          )}
+          {!closed && page.pay_link && !page.simulated && (
+            <ButtonLink tone="primary" size="lg" icon="credit-card" full href={page.pay_link} external>
+              {t("payNow")}
+            </ButtonLink>
+          )}
+          {!closed && page.simulated && !page.plan && (
+            <Button tone="primary" size="lg" icon="credit-card" full busy={sending} pending={t("working")} onClick={simulatePay}>
+              {t("payNowSim")}
+            </Button>
+          )}
+          <ButtonLink size="lg" icon="download" full href={`/api/pay/${token}/pdf`}>
+            {t("downloadInvoice")}
+          </ButtonLink>
+        </section>
+
+        {page.plan && (
+          <SectionCard title={t("yourPlan")} icon="calendar-clock">
+            <ul className="rows">
+              {page.plan.installments.map((item: any, index: number) => {
+                const isNext = !item.is_paid && page.plan.installments.findIndex((i: any) => !i.is_paid) === index;
+                return (
+                  <li key={item.seq} className="row-item plan-row">
+                    <span className="plan-seq">{item.seq}</span>
+                    <div className="row-text">
+                      <strong className="row-title">{money(item.amount_cents)}</strong>
+                      <span className="row-meta">
+                        {t("planPayment")} {item.seq} · {day(item.due_date)}
+                      </span>
+                    </div>
+                    {item.is_paid ? (
+                      <Badge tone="good" icon="circle-check">
+                        {t("payDone")}
+                      </Badge>
+                    ) : isNext && page.simulated ? (
+                      <Button tone="primary" size="sm" busy={sending} pending={t("working")} onClick={simulatePay}>
+                        {t("payNowSim")}
+                      </Button>
+                    ) : item.pay_link && !page.simulated ? (
+                      <ButtonLink tone={isNext ? "primary" : "secondary"} size="sm" href={item.pay_link} external>
+                        {t("payThis")}
+                      </ButtonLink>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </SectionCard>
         )}
-        {page.status === "cancelled" && (
-          <div className="alert" role="status">
-            {t("payCancelled")}
-          </div>
-        )}
-        {page.status === "disputed" && (
-          <div className="alert warn" role="status">
-            ! {t("payHold")}
-          </div>
+
+        {page.offer && !closed && (
+          <SectionCard title={t("ourOffer")} icon="calendar-clock" tone="brand">
+            <ul className="rows">
+              {page.offer.installments.map((item: any) => (
+                <li key={item.seq} className="row-item plan-row">
+                  <span className="plan-seq">{item.seq}</span>
+                  <div className="row-text">
+                    <strong className="row-title">{money(item.amount_cents)}</strong>
+                    <span className="row-meta">
+                      {t("planPayment")} {item.seq} · {day(item.due_date)}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <Button tone="primary" size="lg" icon="check" full busy={sending} pending={t("working")} onClick={() => accept(page.offer.id)}>
+              {t("acceptPlan")}
+            </Button>
+          </SectionCard>
         )}
 
         {!closed && (
-          <>
-            <div className="tile-label">{t("amountOpen")}</div>
-            <div className="hero-value">{money(page.open_cents)}</div>
-            <div className="muted">
-              {t("dueOn")}: {day(page.due_date)}
-            </div>
-            {page.pay_link && !page.simulated && (
-              <a className="button primary big block" href={page.pay_link} target="_blank" rel="noreferrer">
-                {t("payNow")}
-              </a>
-            )}
-            {page.simulated && !page.plan && (
-              <button className="primary big block" disabled={sending} onClick={simulatePay}>
-                {t("payNowSim")}
-              </button>
-            )}
-          </>
-        )}
-        <a className="button block" href={`/api/pay/${token}/pdf`}>
-          {t("downloadInvoice")}
-        </a>
-      </section>
-
-      {page.plan && (
-        <section className="card">
-          <h2>{t("yourPlan")}</h2>
-          <ul className="plan">
-            {page.plan.installments.map((item: any, index: number) => {
-              const isNext = !item.is_paid && page.plan.installments.findIndex((i: any) => !i.is_paid) === index;
-              return (
-                <li key={item.seq} className={item.is_paid ? "is-paid" : ""}>
-                  <span>
-                    {t("planPayment")} {item.seq}: <strong>{money(item.amount_cents)}</strong> ({day(item.due_date)})
-                  </span>
-                  {item.is_paid ? (
-                    <span className="pill good">✓ {t("payDone")}</span>
-                  ) : isNext && page.simulated ? (
-                    <button className="primary" disabled={sending} onClick={simulatePay}>
-                      {t("payNowSim")}
-                    </button>
-                  ) : item.pay_link && !page.simulated ? (
-                    <a className={`button ${isNext ? "primary" : ""}`} href={item.pay_link} target="_blank" rel="noreferrer">
-                      {t("payThis")}
-                    </a>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
-
-      {page.offer && !closed && (
-        <section className="card offer">
-          <h2>{t("ourOffer")}</h2>
-          <ul className="plan">
-            {page.offer.installments.map((item: any) => (
-              <li key={item.seq}>
-                <span>
-                  {t("planPayment")} {item.seq}: <strong>{money(item.amount_cents)}</strong> ({day(item.due_date)})
-                </span>
-              </li>
-            ))}
-          </ul>
-          <button className="primary big block" disabled={sending} onClick={() => accept(page.offer.id)}>
-            {t("acceptPlan")}
-          </button>
-        </section>
-      )}
-
-      {!closed && (
-        <section className="card">
-          <h2>{t("canWeHelp")}</h2>
-          <div className="chat" role="log" aria-live="polite" aria-label={t("chatLog")}>
-            <div className="bubble agent">{t("chatWelcome")}</div>
-            {page.messages.map((message: any, index: number) => (
-              <div key={index} className={`bubble ${message.role}`}>
-                {message.text}
+          <SectionCard title={t("canWeHelp")} icon="message-square">
+            <div className="chat" role="log" aria-live="polite" aria-label={t("chatLog")}>
+              <div className="bubble-row agent">
+                <IconTile name="sparkles" size="sm" />
+                <div className="bubble agent">{t("chatWelcome")}</div>
               </div>
-            ))}
-            {pending && <div className="bubble customer">{pending}</div>}
-            {pending && <div className="bubble agent thinking">{t("oneMoment")}</div>}
-            <div ref={chatEnd} />
-          </div>
-          {page.messages.length === 0 && (
-            <div className="suggestions">
-              {CHIPS.map((key) => (
-                <button key={key} className="suggestion" disabled={sending} onClick={() => send(t(key))}>
-                  {t(key)}
-                </button>
+              {page.messages.map((message: any, index: number) => (
+                <div key={index} className={`bubble-row ${message.role}`}>
+                  {message.role !== "customer" && <IconTile name="sparkles" size="sm" />}
+                  <div className={`bubble ${message.role}`}>{message.text}</div>
+                </div>
               ))}
+              {pending && (
+                <div className="bubble-row customer">
+                  <div className="bubble customer">{pending}</div>
+                </div>
+              )}
+              {pending && (
+                <div className="bubble-row agent">
+                  <IconTile name="sparkles" size="sm" />
+                  <div className="bubble agent thinking">{t("oneMoment")}</div>
+                </div>
+              )}
+              <div ref={chatEnd} />
             </div>
-          )}
-          {error && <ErrorBox text={error} />}
-          <form
-            className="chat-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              send();
-            }}
-          >
-            <input value={draft} maxLength={1000} placeholder={t("chatPlaceholder")} aria-label={t("chatPlaceholder")} onChange={(event) => setDraft(event.target.value)} />
-            <button className="primary" disabled={sending || !draft.trim()}>
-              {t("send")}
-            </button>
-          </form>
-        </section>
-      )}
-      <p className="muted small center">{t("testEnvironment")}</p>
-    </div>
+            {page.messages.length === 0 && (
+              <div className="suggestions">
+                {CHIPS.map((key) => (
+                  <Button key={key} size="sm" className="suggestion" disabled={sending} onClick={() => send(t(key))}>
+                    {t(key)}
+                  </Button>
+                ))}
+              </div>
+            )}
+            {error && <ErrorBox text={error} />}
+            <form
+              className="chat-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                send();
+              }}
+            >
+              <input value={draft} maxLength={1000} placeholder={t("chatPlaceholder")} aria-label={t("chatPlaceholder")} onChange={(event) => setDraft(event.target.value)} />
+              <Button type="submit" tone="primary" icon="send" disabled={sending || !draft.trim()}>
+                {t("send")}
+              </Button>
+            </form>
+          </SectionCard>
+        )}
+        <p className="pay-foot">
+          <Icon name="info" size="sm" />
+          {t("testEnvironment")}
+        </p>
+      </Page>
+    </main>
   );
 }

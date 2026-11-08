@@ -1,32 +1,16 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api";
-import { ErrorBox, Loading, PageHeader } from "../components";
-import { Tools, useT } from "../i18n";
+import { useT } from "../i18n";
+import { Alert, ErrorBox } from "../ui/Alert";
+import { Button } from "../ui/Button";
+import { EmptyState } from "../ui/EmptyState";
+import { Loading } from "../ui/Loading";
+import { Page, PageHeader } from "../ui/PageHeader";
+import { ActorBadge, eventText } from "../widgets/events";
+import type { PageProps } from "../widgets/page";
 
-const HIDDEN = new Set(["paypal_ids", "paypal_id", "paypal_payment_id", "reason_de", "issues", "error_count"]);
-
-/** Turns the stored details of a step into a short readable line in the chosen language. */
-export function eventText(data: Record<string, unknown>, tools: Tools): string {
-  const { t, lang, labels, eur } = tools;
-  return Object.entries(data)
-    .filter(([key, value]) => !HIDDEN.has(key) && value !== null && value !== "" && !(Array.isArray(value) && value.length === 0))
-    .map(([key, value]) => {
-      const name = key.endsWith("_cents") ? key.replace("_cents", "") : key;
-      const label = labels.field[name] || name.replaceAll("_", " ");
-      let shown: unknown = value;
-      if (key.endsWith("_cents") && typeof value === "number") shown = eur(value);
-      else if (key === "reason" && lang === "de" && data.reason_de) shown = data.reason_de;
-      else if (key === "action" || key === "proposed") shown = labels.action[String(value)] || value;
-      else if (typeof value === "boolean") shown = value ? t("yes") : t("no");
-      else if (Array.isArray(value)) shown = value.join(", ");
-      else if (typeof value === "string" && labels.value[value]) shown = labels.value[value];
-      return `${label}: ${shown}`;
-    })
-    .join(" · ");
-}
-
-export function Audit({ version }: { version: number }) {
+export function Audit({ version }: PageProps) {
   const tools = useT();
   const { t, labels, dateTime } = tools;
   const [events, setEvents] = useState<any[] | null>(null);
@@ -65,61 +49,69 @@ export function Audit({ version }: { version: number }) {
   if (!events) return <Loading shape="list" title={t("audit")} />;
 
   return (
-    <>
+    <Page template="list">
       <PageHeader title={t("audit")} info={t("auditIntro")} />
       {chain ? (
-        <div className={`alert ${chain.ok ? "good" : "error"}`} role={chain.ok ? "status" : "alert"}>
+        <Alert tone={chain.ok ? "good" : "bad"} icon={chain.ok ? "shield-check" : "shield-x"} role={chain.ok ? "status" : "alert"}>
           {chain.ok ? t("chainOk", { n: chain.checked }) : t("chainBad", { n: chain.broken_at })}
-        </div>
+        </Alert>
       ) : (
-        <div className="alert" role="status">
+        <Alert icon="shield-check" role="status">
           {t("chainChecking")}
-        </div>
+        </Alert>
       )}
       {error && <ErrorBox text={error} />}
-      <div className="card table-card">
-        <table className="rtable">
-          <thead>
-            <tr>
-              <th scope="col">{t("when")}</th>
-              <th scope="col">{t("who")}</th>
-              <th scope="col">{t("whatHappenedShort")}</th>
-              <th scope="col">{t("invoice")}</th>
-              <th scope="col">{t("details")}</th>
-              <th scope="col">{t("fingerprint")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((event: any) => (
-              <tr key={event.id}>
-                <td className="nowrap muted" data-label={t("when")}>
-                  {dateTime(event.at)}
-                </td>
-                <td data-label={t("who")}>
-                  <span className={`actor ${event.actor}`}>{labels.actor[event.actor] || event.actor}</span>
-                </td>
-                <td className="lead" data-label={t("whatHappenedShort")}>
-                  {labels.audit[event.action] || event.action.replaceAll("_", " ")}
-                </td>
-                <td data-label={t("invoice")}>{event.invoice_id ? <a href={`#/invoices/${event.invoice_id}`}>{event.invoice_id}</a> : "-"}</td>
-                <td className="small muted" data-label={t("details")}>
-                  {eventText(event.data, tools)}
-                </td>
-                <td className="mono small muted" data-label={t("fingerprint")}>
-                  {event.hash}
-                </td>
+      <section className="card flush" aria-label={t("audit")}>
+        {events.length === 0 ? (
+          <div className="card-pad">
+            <EmptyState icon="list-checks" title={t("nothingYet")} />
+          </div>
+        ) : (
+          <table className="rtable audit-table">
+            <thead>
+              <tr>
+                <th scope="col">{t("when")}</th>
+                <th scope="col">{t("who")}</th>
+                <th scope="col">{t("whatHappenedShort")}</th>
+                <th scope="col">{t("invoice")}</th>
+                <th scope="col">{t("details")}</th>
+                <th scope="col">{t("fingerprint")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {nextId && (
-        <div className="button-row">
-          <button disabled={loadingMore} aria-busy={loadingMore} onClick={loadMore}>
-            {t("loadMore")}
-          </button>
-        </div>
-      )}
-    </>
+            </thead>
+            <tbody>
+              {events.map((event: any) => (
+                <tr key={event.id}>
+                  <td className="nowrap muted" data-label={t("when")}>
+                    <time dateTime={event.at}>{dateTime(event.at)}</time>
+                  </td>
+                  <td data-label={t("who")}>
+                    <ActorBadge actor={event.actor} />
+                  </td>
+                  <td className="lead" data-label={t("whatHappenedShort")}>
+                    {labels.audit[event.action] || event.action.replaceAll("_", " ")}
+                  </td>
+                  <td className="nowrap" data-label={t("invoice")}>
+                    {event.invoice_id ? <a href={`#/invoices/${event.invoice_id}`}>{t("invoiceRef", { id: event.invoice_id })}</a> : <span className="muted">-</span>}
+                  </td>
+                  <td className="small muted details-cell" data-label={t("details")}>
+                    {eventText(event.data, tools)}
+                  </td>
+                  <td className="mono small muted" data-label={t("fingerprint")}>
+                    {event.hash}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {nextId && (
+          <div className="list-foot">
+            <Button icon="chevron-down" busy={loadingMore} pending={t("loading")} onClick={loadMore}>
+              {t("loadMore")}
+            </Button>
+          </div>
+        )}
+      </section>
+    </Page>
   );
 }

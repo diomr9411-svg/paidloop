@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- PaidLoop app icon: a P drawn as one loop, in the brand blue. The logo is exempt from the screen palette rules. -->
+  <rect width="32" height="32" rx="8" fill="#2453d6"/>
+  <path d="M11.5 24.5V8h6a5.25 5.25 0 0 1 0 10.5h-6" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

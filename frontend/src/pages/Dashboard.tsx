@@ -1,70 +1,66 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api";
-import { RunAgentButton } from "../App";
-import { BarRows, Empty, ErrorBox, Loading, PageHeader } from "../components";
 import { useT } from "../i18n";
+import { Alert, ErrorBox } from "../ui/Alert";
+import { BarRows } from "../ui/BarRows";
+import { ButtonLink } from "../ui/Button";
+import { Card, SectionCard } from "../ui/Card";
+import { cx } from "../ui/cx";
+import { EmptyState } from "../ui/EmptyState";
+import { Icon, IconName, IconTile, Tone } from "../ui/Icon";
+import { Loading } from "../ui/Loading";
+import { Page, PageHeader } from "../ui/PageHeader";
+import { StatTile } from "../ui/StatTile";
+import { Badge } from "../ui/Badge";
+import type { PageProps } from "../widgets/page";
+import { RunAgentButton } from "../widgets/RunAgentButton";
 
-function Tile({ label, value, note, tone, href }: { label: string; value: string; note: string; tone?: string; href?: string }) {
-  const inner = (
-    <>
-      <div className="tile-label">{label}</div>
-      <div className="tile-value">{value}</div>
-      <div className="tile-note">{note}</div>
-    </>
-  );
-  return href ? (
-    <a className={`card tile link-tile ${tone || ""}`} href={href}>
-      {inner}
-    </a>
-  ) : (
-    <div className={`card tile ${tone || ""}`}>{inner}</div>
-  );
-}
+type QueueItem = { kind: "approval" | "draft" | "no_reminder_yet"; invoice_id: number; action: string; customer: string | null; amount_cents: number; days_late: number };
 
-function Queue({ view, refresh }: { view: any; refresh: () => void }) {
+const KIND: Record<QueueItem["kind"], { icon: IconName; tone: Tone }> = {
+  approval: { icon: "inbox", tone: "info" },
+  draft: { icon: "file-pen", tone: "neutral" },
+  no_reminder_yet: { icon: "bell", tone: "warn" },
+};
+
+function NextSteps({ queue, refresh }: { queue: QueueItem[]; refresh: () => void }) {
   const { t, labels, eur, daysLate } = useT();
   return (
-    <section className="card queue-card">
-      <div className="title-row">
-        <h2>{t("nextSteps")}</h2>
-        <RunAgentButton refresh={refresh} small />
-      </div>
-      {view.queue.length === 0 ? (
-        <Empty title={t("allDone")} hint={t("allDoneHint")} />
+    <SectionCard title={t("nextSteps")} subtitle={queue.length ? t("nextStepsHint") : undefined} actions={<RunAgentButton refresh={refresh} size="sm" />} className="next-steps">
+      {queue.length === 0 ? (
+        <EmptyState icon="circle-check" tone="good" title={t("allDone")} hint={t("allDoneHint")} />
       ) : (
-        <>
-          <p className="muted small">{t("nextStepsHint")}</p>
-          <ol className="queue">
-            {view.queue.map((item: any, index: number) => {
-              const href =
-                item.kind === "approval" ? "#/approvals" : item.kind === "draft" ? `#/new?draft=${item.invoice_id}` : `#/invoices/${item.invoice_id}`;
-              const button = item.kind === "approval" ? t("queueApproval") : item.kind === "draft" ? t("queueContinue") : t("queueOpen");
-              const what = item.kind === "approval" ? labels.action[item.action] || item.action : item.kind === "draft" ? t("queueDraft") : t("queueNoReminder");
-              return (
-                <li key={`${item.kind}-${item.invoice_id}-${item.action}`}>
-                  <div className="queue-text">
-                    <strong>{what}</strong>
-                    <span className="muted small">
-                      {item.customer || t("draftUnnamed")}
-                      {item.amount_cents ? ` · ${eur(item.amount_cents)}` : ""}
-                      {item.days_late > 0 ? ` · ${daysLate(item.days_late)}` : ""}
-                    </span>
-                  </div>
-                  <a className={`button ${index === 0 ? "primary" : ""}`} href={href}>
-                    {button}
-                  </a>
-                </li>
-              );
-            })}
-          </ol>
-        </>
+        <ol className="rows">
+          {queue.map((item) => {
+            const href = item.kind === "approval" ? "#/approvals" : item.kind === "draft" ? `#/new?draft=${item.invoice_id}` : `#/invoices/${item.invoice_id}`;
+            const button = item.kind === "approval" ? t("queueApproval") : item.kind === "draft" ? t("queueContinue") : t("queueOpen");
+            const what = item.kind === "approval" ? labels.action[item.action] || item.action : item.kind === "draft" ? t("queueDraft") : t("queueNoReminder");
+            const kind = KIND[item.kind] || KIND.no_reminder_yet;
+            return (
+              <li className="row-item" key={`${item.kind}-${item.invoice_id}-${item.action}`}>
+                <IconTile name={kind.icon} tone={kind.tone} size="sm" />
+                <div className="row-text">
+                  <strong className="row-title">{what}</strong>
+                  <span className="row-meta">
+                    {item.customer || t("draftUnnamed")}
+                    {item.amount_cents ? ` · ${eur(item.amount_cents)}` : ""}
+                    {item.days_late > 0 ? ` · ${daysLate(item.days_late)}` : ""}
+                  </span>
+                </div>
+                <ButtonLink size="sm" tone="ghost" iconEnd="arrow-right" href={href}>
+                  {button}
+                </ButtonLink>
+              </li>
+            );
+          })}
+        </ol>
       )}
-    </section>
+    </SectionCard>
   );
 }
 
-export function Dashboard({ version, refresh, simulated }: { version: number; refresh: () => void; simulated?: boolean }) {
+export function Dashboard({ version, refresh, health }: PageProps) {
   const { t, eur, day, invoiceCount } = useT();
   const [view, setView] = useState<any>(null);
   const [error, setError] = useState("");
@@ -93,114 +89,141 @@ export function Dashboard({ version, refresh, simulated }: { version: number; re
 
   const empty = view.open_count === 0 && view.paid_count === 0 && view.queue.length === 0;
   const results = view.performance;
+  const negative = view.spendable_cents < 0;
   return (
-    <>
+    <Page template="dashboard">
       <PageHeader
         title={t("homeTitle")}
         actions={
-          <a className="button primary" href="#/new">
+          <ButtonLink tone="primary" icon="file-plus" href="#/new">
             {t("newInvoice")}
-          </a>
+          </ButtonLink>
         }
       />
       {error && <ErrorBox text={error} />}
-      {simulated && (
-        <div className="card callout attention connect-callout">
-          <div>
-            <strong>{t("connectPaypal")}</strong>
-            <p className="small">{t("connectPaypalHint")}</p>
-          </div>
-          <a className="button" href="#/settings/connections">
-            {t("connectPaypal")}
-          </a>
-        </div>
+      {health?.paypal_mode === "simulated" && (
+        <Alert
+          tone="warn"
+          icon="plug"
+          title={t("connectPaypal")}
+          action={
+            <ButtonLink size="sm" href="#/settings/connections" iconEnd="arrow-right">
+              {t("connectPaypal")}
+            </ButtonLink>
+          }
+        >
+          {t("connectPaypalHint")}
+        </Alert>
       )}
       {empty && (
-        <div className="card callout">
-          <strong>{t("emptyStart")}</strong> <a href="#/new">{t("emptyStartLink")}</a> {t("emptyStartRest")}
-        </div>
+        <Card>
+          <EmptyState
+            icon="receipt-text"
+            title={t("emptyStart")}
+            hint={t("emptyStartHint")}
+            action={
+              <ButtonLink tone="primary" icon="file-plus" href="#/new">
+                {t("emptyStartLink")}
+              </ButtonLink>
+            }
+          />
+        </Card>
       )}
 
-      <div className="columns home-top">
-        <div className="hero card">
-          <div className="tile-label">{t("spendable")}</div>
-          <div className={`hero-value ${view.spendable_cents < 0 ? "negative" : ""}`}>{eur(view.spendable_cents)}</div>
-          <div className="tile-note">
-            {t("spendableNote", { cash: eur(view.cash_cents), vat: eur(view.vat_due_cents) })}
-            {view.vat_on_unpaid_cents > 0 && ` ${t("spendableSoll", { vat: eur(view.vat_on_unpaid_cents) })}`}
+      <div className="home-top">
+        <section className="card hero" aria-labelledby="spendable-label">
+          <div className="hero-head">
+            <span className="stat-label" id="spendable-label">
+              {t("spendable")}
+            </span>
+            <IconTile name="wallet" />
           </div>
-        </div>
-        <Queue view={view} refresh={refresh} />
+          <p className={cx("hero-value", negative && "negative")}>{eur(view.spendable_cents)}</p>
+          <dl className="hero-facts">
+            <div>
+              <dt>{t("received")}</dt>
+              <dd>{eur(view.cash_cents)}</dd>
+            </div>
+            <div>
+              <dt>{t("vatForTaxOffice")}</dt>
+              <dd>{eur(-view.vat_due_cents)}</dd>
+            </div>
+          </dl>
+          {negative && (
+            <p className="hero-note warn">
+              <Icon name="triangle-exclamation-point" size="sm" />
+              {t("spendableNegative")}
+            </p>
+          )}
+          {view.vat_on_unpaid_cents > 0 && <p className="hero-note">{t("spendableSoll", { vat: eur(view.vat_on_unpaid_cents) })}</p>}
+        </section>
+        <NextSteps queue={view.queue} refresh={refresh} />
       </div>
 
       <div className="tiles">
-        <Tile label={t("waitingToBePaid")} value={eur(view.open_cents)} note={invoiceCount(view.open_count)} href="#/invoices?filter=open" />
-        <Tile
+        <StatTile label={t("waitingToBePaid")} value={eur(view.open_cents)} note={invoiceCount(view.open_count)} icon="hourglass" href="#/invoices?filter=open" />
+        <StatTile
           label={t("overdue")}
           value={eur(view.overdue_cents)}
           note={invoiceCount(view.overdue_count)}
-          tone={view.overdue_count ? "warn" : ""}
+          icon="triangle-exclamation-point"
+          tone={view.overdue_count ? "warn" : "info"}
           href="#/invoices?filter=overdue"
         />
-        <Tile label={t("onPlanTile")} value={eur(view.on_plan_cents)} note={t("onPlanNote")} href="#/invoices?filter=on_plan" />
-        <Tile label={t("onHoldTile")} value={eur(view.disputed_cents)} note={t("onHoldNote")} href="#/invoices?filter=disputed" />
+        <StatTile label={t("onPlanTile")} value={eur(view.on_plan_cents)} note={t("onPlanNote")} icon="calendar-clock" href="#/invoices?filter=on_plan" />
+        <StatTile label={t("onHoldTile")} value={eur(view.disputed_cents)} note={t("onHoldNote")} icon="circle-pause" href="#/invoices?filter=disputed" />
       </div>
 
       <div className="columns">
-        <section className="card">
-          <h2>{t("whenMoney")}</h2>
-          <p className="muted small">{t("whenMoneyHint")}</p>
+        <SectionCard title={t("whenMoney")} subtitle={t("whenMoneyHint")} icon="calendar">
           <BarRows
             label={t("moneyByDate")}
             rows={[
-              { key: "week", label: t("next7"), cents: view.forecast.week, hint: t("next7Hint") },
-              { key: "month", label: t("next30"), cents: view.forecast.month, hint: t("next30Hint") },
-              { key: "later", label: t("later"), cents: view.forecast.later, hint: t("laterHint") },
-              { key: "risk", label: t("atRisk"), cents: view.forecast.at_risk, risk: true, hint: t("atRiskHint") },
+              { key: "week", label: t("next7"), value: view.forecast.week, display: eur(view.forecast.week), hint: t("next7Hint") },
+              { key: "month", label: t("next30"), value: view.forecast.month, display: eur(view.forecast.month), hint: t("next30Hint") },
+              { key: "later", label: t("later"), value: view.forecast.later, display: eur(view.forecast.later), hint: t("laterHint") },
+              { key: "risk", label: t("atRisk"), value: view.forecast.at_risk, display: eur(view.forecast.at_risk), hint: t("atRiskHint"), risk: true },
             ]}
           />
-        </section>
-        <section className="card">
-          <h2>{t("howLate")}</h2>
-          <p className="muted small">{t("howLateHint")}</p>
+        </SectionCard>
+        <SectionCard title={t("howLate")} subtitle={t("howLateHint")} icon="clock">
           <BarRows
             label={t("moneyByAge")}
             rows={[
-              { key: "not_due", label: t("ageNotDue"), cents: view.aging.not_due, hint: t("ageNotDue") },
-              { key: "d1", label: t("age1"), cents: view.aging.days_1_30, hint: t("age1") },
-              { key: "d31", label: t("age31"), cents: view.aging.days_31_60, hint: t("age31") },
-              { key: "d61", label: t("age61"), cents: view.aging.days_61_plus, risk: true, hint: t("age61") },
+              { key: "not_due", label: t("ageNotDue"), value: view.aging.not_due, display: eur(view.aging.not_due), hint: t("ageNotDueHint") },
+              { key: "d1", label: t("age1"), value: view.aging.days_1_30, display: eur(view.aging.days_1_30), hint: t("age1Hint") },
+              { key: "d31", label: t("age31"), value: view.aging.days_31_60, display: eur(view.aging.days_31_60), hint: t("age31Hint") },
+              { key: "d61", label: t("age61"), value: view.aging.days_61_plus, display: eur(view.aging.days_61_plus), hint: t("age61Hint"), risk: true },
             ]}
           />
-        </section>
+        </SectionCard>
       </div>
 
       <div className="columns">
-        <section className="card">
-          <h2>{t("howWell")}</h2>
-          <p className="muted small">{t("howWellHint")}</p>
+        <SectionCard title={t("howWell")} subtitle={t("howWellHint")} icon="gauge">
           <dl className="measures">
             <div>
               <dt>{t("avgDaysToPaid")}</dt>
-              <dd>{results.avg_days_to_paid === null ? t("noData") : t("avgDaysValue", { n: results.avg_days_to_paid })}</dd>
-              {results.paid_count > 0 && <dd className="muted small">{t("basedOnPaid", { n: results.paid_count })}</dd>}
+              <dd className="measure-value">{results.avg_days_to_paid === null ? t("noData") : t("avgDaysValue", { n: results.avg_days_to_paid })}</dd>
+              {results.paid_count > 0 && <dd className="measure-note">{t("basedOnPaid", { n: results.paid_count })}</dd>}
             </div>
             <div>
               <dt>{t("onTimeRate")}</dt>
-              <dd>{results.on_time_percent === null ? t("noData") : `${results.on_time_percent} %`}</dd>
-              {results.paid_count > 0 && <dd className="muted small">{t("basedOnPaid", { n: results.paid_count })}</dd>}
+              <dd className="measure-value">{results.on_time_percent === null ? t("noData") : `${results.on_time_percent} %`}</dd>
+              {results.paid_count > 0 && <dd className="measure-note">{t("basedOnPaid", { n: results.paid_count })}</dd>}
             </div>
             <div>
               <dt>{t("noteToIssued")}</dt>
-              <dd>{results.avg_seconds_to_issue === null ? t("noData") : formatSeconds(results.avg_seconds_to_issue, t)}</dd>
-              {results.timed_invoices > 0 && <dd className="muted small">{t("basedOnTimed", { n: results.timed_invoices })}</dd>}
+              <dd className="measure-value">{results.avg_seconds_to_issue === null ? t("noData") : formatSeconds(results.avg_seconds_to_issue, t)}</dd>
+              {results.timed_invoices > 0 && <dd className="measure-note">{t("basedOnTimed", { n: results.timed_invoices })}</dd>}
             </div>
           </dl>
-        </section>
-        <section className="card">
-          <h2>{t("nextExpected")}</h2>
+        </SectionCard>
+        <SectionCard title={t("nextExpected")} icon="calendar-clock" flush>
           {view.upcoming.length === 0 ? (
-            <p className="muted">{t("noOpenPayments")}</p>
+            <div className="card-pad">
+              <EmptyState icon="calendar" title={t("noOpenPayments")} />
+            </div>
           ) : (
             <table className="rtable">
               <thead>
@@ -213,14 +236,20 @@ export function Dashboard({ version, refresh, simulated }: { version: number; re
                 </tr>
               </thead>
               <tbody>
-                {view.upcoming.map((item: any, index: number) => (
-                  <tr key={index}>
+                {view.upcoming.map((item: any) => (
+                  <tr key={`${item.invoice_id}-${item.expected_on}`}>
                     <td className="nowrap" data-label={t("expected")}>
                       {day(item.expected_on)}
                     </td>
                     <td className="lead" data-label={t("customer")}>
-                      <a href={`#/invoices/${item.invoice_id}`}>{item.customer}</a>
-                      {item.risk === "high" && <span className="pill warn small-pill">! {t("highRisk")}</span>}
+                      <span className="cell-line">
+                        <a href={`#/invoices/${item.invoice_id}`}>{item.customer}</a>
+                        {item.risk === "high" && (
+                          <Badge tone="warn" icon="triangle-exclamation-point">
+                            {t("highRisk")}
+                          </Badge>
+                        )}
+                      </span>
                     </td>
                     <td className="num" data-label={t("amount")}>
                       {eur(item.amount_cents)}
@@ -230,10 +259,13 @@ export function Dashboard({ version, refresh, simulated }: { version: number; re
               </tbody>
             </table>
           )}
-        </section>
+        </SectionCard>
       </div>
-      <p className="muted small">{view.ledger_balanced ? t("ledgerOk") : t("ledgerBad")}</p>
-    </>
+      <p className={cx("status-line", view.ledger_balanced ? "good" : "bad")}>
+        <Icon name={view.ledger_balanced ? "circle-check" : "circle-exclamation-point"} size="sm" />
+        {view.ledger_balanced ? t("ledgerOk") : t("ledgerBad")}
+      </p>
+    </Page>
   );
 }
 

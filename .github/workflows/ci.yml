@@ -55,7 +55,7 @@ jobs:
           retention-days: 7
 
   screens-walk:
-    name: Screens in a real browser (143 checks)
+    name: Screens in a real browser (169 checks)
     needs: [server, screens-build]
     runs-on: ubuntu-latest
     steps:
@@ -83,6 +83,12 @@ jobs:
           curl -sf --max-time 180 -X POST http://127.0.0.1:8000/api/demo/reset
       - name: Walk every screen at 5 widths, in light, dark, German, compact and reduced motion
         run: npm run walk
+        working-directory: frontend
+        env:
+          CI: "true"
+          CHROME_PATH: /usr/bin/google-chrome
+      - name: Use the main flows like an owner (note to issued invoice, payment, cancel, settings, customer chat, phone menu)
+        run: npm run flows
         working-directory: frontend
         env:
           CI: "true"

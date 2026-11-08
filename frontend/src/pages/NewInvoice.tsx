@@ -1,8 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 
 import { addDays, api, customerLink, lineNetCents, numberText, post, put, toNumber, totals } from "../api";
-import { BusyLabel, Empty, ErrorBox, Field, PageHeader, useCopyLink } from "../components";
 import { useT } from "../i18n";
+import { Alert, ErrorBox } from "../ui/Alert";
+import { Badge } from "../ui/Badge";
+import { Button, ButtonLink } from "../ui/Button";
+import { SectionCard } from "../ui/Card";
+import { cx } from "../ui/cx";
+import { EmptyState } from "../ui/EmptyState";
+import { Field, FieldGrid, Switch } from "../ui/Field";
+import { Icon, IconName, IconTile, InitialsTile } from "../ui/Icon";
+import { Page, PageHeader } from "../ui/PageHeader";
+import { Stepper } from "../ui/Stepper";
+import { useCopyLink } from "../widgets/copyLink";
+import type { PageProps } from "../widgets/page";
 
 type Line = { description: string; quantity: string; unit: string; price: string; vat: string };
 type CustomerForm = { id: number | null; name: string; street: string; postcode: string; city: string; email: string; is_business: boolean; language: string };
@@ -12,6 +23,16 @@ const STORE = "paidloop.newInvoice";
 const STEPS: Step[] = ["note", "details", "check", "done"];
 const EMPTY_CUSTOMER: CustomerForm = { id: null, name: "", street: "", postcode: "", city: "", email: "", is_business: true, language: "de" };
 const MAX_TIMED_SECONDS = 3600; // a longer time means the work was left open, so it isn't a fair measure
+const SEVERITY: Record<string, { icon: IconName; tag: "mustFix" | "lookAt" | "noteTag" }> = {
+  error: { icon: "circle-x", tag: "mustFix" },
+  warning: { icon: "triangle-exclamation-point", tag: "lookAt" },
+  info: { icon: "info", tag: "noteTag" },
+};
+
+function localToday(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
 
 function loadSaved(): any {
   try {
@@ -21,7 +42,7 @@ function loadSaved(): any {
   }
 }
 
-export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => void }) {
+export function NewInvoice({ hash, refresh }: PageProps) {
   const { t, lang, labels, eur, day, duration } = useT();
   const copyLink = useCopyLink();
   const draftParam = Number(new URLSearchParams(hash.split("?")[1] || "").get("draft")) || null;
@@ -93,7 +114,7 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
         setStep("details");
       })
       .catch((e) => setError(e.message));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per draft; the language only shapes the numbers when it opens
   }, [draftParam]);
 
   // Keep unfinished work when the owner looks at another page.
@@ -123,10 +144,25 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
     if (lastLang.current === lang) return;
     lastLang.current = lang;
     if (step === "check" && draftId) post(`/api/invoices/${draftId}/check`).then(applyCheck).catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a language switch should ask again
   }, [lang]);
 
-  const clock = () => todayIso || new Date().toISOString().slice(0, 10);
+  // Ctrl+Enter does the main action of the step while typing (read the note, check the invoice).
+  const mainAction = useRef<() => void>(() => undefined);
+  mainAction.current = step === "note" ? read : step === "details" ? saveAndCheck : () => undefined;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !(event.target as HTMLElement).closest("dialog")) {
+        event.preventDefault();
+        mainAction.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // The demo clock's day; until it has loaded, today on this computer (local date, not UTC, so it is right after midnight too).
+  const clock = () => todayIso || localToday();
 
   function emptyLine(): Line {
     return { description: "", quantity: "1", unit: "H87", price: "", vat: defaultVat };
@@ -178,6 +214,7 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
   }
 
   async function read() {
+    if (reading) return;
     if (!note.trim()) {
       setError(t("writeFirst"));
       return;
@@ -274,6 +311,8 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
       }),
     );
     setFieldErrors({});
+    focusAfter.current = null;
+    window.setTimeout(() => document.getElementById("add-item")?.focus(), 0);
   }
 
   function setCustomerField(change: Partial<CustomerForm>) {
@@ -402,44 +441,35 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
   const flag = (field: string) => unsure.includes(field);
   const firstFixable = check?.issues.find((item: any) => item.severity === "error" && targetOf(item.field));
   const stepIndex = STEPS.indexOf(step);
+  const toFix = check?.issues.filter((item: any) => item.severity === "error").length || 0;
+  const source = capture?.source === "ai" ? { icon: "sparkles" as const, text: t("readByAi") } : capture ? { icon: "list-checks" as const, text: t("readByRules") } : { icon: "pencil" as const, text: t("enteredByHand") };
 
   return (
-    <>
+    <Page template="wizard">
       <PageHeader
         title={t("newInvoice")}
         actions={
           step !== "note" && step !== "done" ? (
-            <button className="link" onClick={startOver}>
+            <Button tone="ghost" icon="refresh-cw" onClick={startOver}>
               {t("startOver")}
-            </button>
+            </Button>
           ) : undefined
         }
       />
 
-      <ol className="stepper" aria-label={t("stepsLabel")}>
-        {STEPS.map((name, index) => {
-          const label = { note: t("stepNote"), details: t("stepDetails"), check: t("stepCheck"), done: t("stepDone") }[name];
-          return (
-            <li key={name} className={index === stepIndex ? "current" : index < stepIndex ? "complete" : ""} aria-current={index === stepIndex ? "step" : undefined}>
-              <span className="step-mark" aria-hidden="true">
-                {index < stepIndex ? "✓" : index + 1}
-              </span>
-              {label}
-            </li>
-          );
-        })}
-      </ol>
+      <Stepper steps={[t("stepNote"), t("stepDetails"), t("stepCheck"), t("stepDone")]} current={stepIndex} label={t("stepsLabel")} />
 
       {restored && step !== "done" && (
-        <div className="alert info" role="status">
+        <Alert tone="info" icon="file-pen" role="status">
           {t("draftRestored")}
-        </div>
+        </Alert>
       )}
       {error && <ErrorBox text={error} />}
 
       {step === "note" && (
         <section
-          className={`card dropzone ${dragging ? "dragging" : ""}`}
+          className={cx("card", "dropzone", dragging && "dragging")}
+          aria-labelledby="note-title"
           onDragOver={(event) => {
             event.preventDefault();
             setDragging(true);
@@ -452,18 +482,27 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
             if (file) upload(file);
           }}
         >
-          <h2 ref={heading} tabIndex={-1}>
-            {t("noteTitle")}
-          </h2>
-          <p className="muted">{dragging ? t("dropHere") : t("noteHint")}</p>
+          <div className="card-head">
+            <div className="card-title">
+              <IconTile name="scan-text" size="sm" />
+              <div className="card-title-text">
+                <h2 id="note-title" ref={heading} tabIndex={-1}>
+                  {t("noteTitle")}
+                </h2>
+                <p className="card-sub">{dragging ? t("dropHere") : t("noteHint")}</p>
+              </div>
+            </div>
+          </div>
           <label className="sr-only" htmlFor="job-note">
             {t("noteLabel")}
           </label>
           <textarea
             id="job-note"
-            rows={4}
+            className="note-input"
+            rows={5}
             value={note}
             maxLength={4000}
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- the note is the only thing to do on this step, so typing starts here
             autoFocus
             placeholder={t("noteExample")}
             onChange={(event) => {
@@ -471,34 +510,26 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
               setNote(event.target.value);
               setError("");
             }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                event.preventDefault();
-                read();
-              }
-            }}
           />
-          <div className="button-row">
-            <button className="primary big" disabled={reading} aria-busy={reading} onClick={read}>
-              <BusyLabel busy={reading} label={t("readNote")} pending={t("reading")} />
-            </button>
-            <button disabled={reading} onClick={() => fileInput.current?.click()}>
+          <p className="drop-hint">
+            <Icon name="cloud-upload" size="sm" />
+            {t("dropHint")}
+          </p>
+          <div className="note-actions">
+            <Button tone="primary" size="lg" icon="scan-text" busy={reading} pending={t("reading")} onClick={read}>
+              {t("readNote")}
+            </Button>
+            <Button icon="upload" disabled={reading} onClick={() => fileInput.current?.click()}>
               {t("uploadFile")}
-            </button>
-            <button disabled={reading} onClick={byHand}>
+            </Button>
+            <Button tone="ghost" icon="pencil" disabled={reading} onClick={byHand}>
               {t("byHand")}
-            </button>
-            <button className="link" disabled={reading} onClick={() => setNote(t("noteExample"))}>
+            </Button>
+            <Button tone="link" icon="lightbulb" disabled={reading} onClick={() => setNote(t("noteExample"))}>
               {t("useExample")}
-            </button>
+            </Button>
             <kbd className="hint-key">Ctrl + Enter</kbd>
-            <input
-              ref={fileInput}
-              type="file"
-              hidden
-              accept=".pdf,.png,.jpg,.jpeg"
-              onChange={(event) => event.target.files?.[0] && upload(event.target.files[0])}
-            />
+            <input ref={fileInput} type="file" hidden accept=".pdf,.png,.jpg,.jpeg" onChange={(event) => event.target.files?.[0] && upload(event.target.files[0])} />
           </div>
           {reading && (
             <p className="muted small" role="status">
@@ -509,249 +540,237 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
       )}
 
       {step === "details" && (
-        <div
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-              event.preventDefault();
-              saveAndCheck();
-            }
-          }}
-        >
-          <section className="card">
-            <div className="title-row">
-              <h2 ref={heading} tabIndex={-1}>
+        <>
+          <section className="card" aria-labelledby="details-title">
+            <div className="card-head">
+              <h2 id="details-title" ref={heading} tabIndex={-1}>
                 {t("detailsTitle")}
               </h2>
-              <span className="chip">{capture?.source === "ai" ? t("readByAi") : capture ? t("readByRules") : t("enteredByHand")}</span>
+              <Badge icon={source.icon}>{source.text}</Badge>
             </div>
             {capture?.warnings?.map((warning: any) => (
-              <div className="alert warn" key={warning.en}>
-                ! {warning[lang]}
-              </div>
+              <Alert tone="warn" key={warning.en}>
+                {warning[lang]}
+              </Alert>
             ))}
-            {unsure.length > 0 && <p className="note-unsure">! {t("unsureNote")}</p>}
+            {unsure.length > 0 && <Alert tone="warn">{t("unsureNote")}</Alert>}
 
-            <h3>{t("customerSection")}</h3>
-            {customer.id && !customerOpen ? (
-              <div className="known">
-                <div>
-                  <span className="muted small">{t("knownCustomer")}</span>
-                  <div>
+            <div className="form-section">
+              <h3 className="section-label">{t("customerSection")}</h3>
+              {customer.id && !customerOpen ? (
+                <div className="known">
+                  <InitialsTile name={customer.name} />
+                  <div className="known-text">
+                    <span className="eyebrow">{t("knownCustomer")}</span>
                     <strong>{customer.name}</strong>
+                    <span className="small muted">{[customer.street, [customer.postcode, customer.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")}</span>
+                    <span className="small muted">
+                      {customer.email || t("noEmailYet")} · {customer.is_business ? t("typeBusiness") : t("typePrivate")} · {customer.language === "en" ? t("langEnglish") : t("langGerman")}
+                    </span>
                   </div>
-                  <div className="small muted">
-                    {[customer.street, [customer.postcode, customer.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")}
-                  </div>
-                  <div className="small muted">
-                    {customer.email || t("noEmailYet")} · {customer.is_business ? t("typeBusiness") : t("typePrivate")} ·{" "}
-                    {customer.language === "en" ? t("langEnglish") : t("langGerman")}
-                  </div>
-                </div>
-                <div className="button-row tight">
-                  <button onClick={() => setCustomerOpen(true)}>{t("editDetails")}</button>
-                  <button
-                    onClick={() => {
-                      setCustomer({ ...EMPTY_CUSTOMER, language: lang });
-                      setCustomerOpen(true);
-                      focusAfter.current = "buyer.name";
-                    }}
-                  >
-                    {t("chooseAnother")}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="form-grid">
-                <Field
-                  id="buyer.name"
-                  label={t("customerName")}
-                  hint={customer.id ? undefined : t("customerNameHint")}
-                  unsure={flag("customer_name")}
-                  error={fieldErrors["buyer.name"]}
-                >
-                  <input
-                    list="known-customers"
-                    autoComplete="off"
-                    value={customer.name}
-                    onChange={(event) => (customer.id ? setCustomerField({ name: event.target.value }) : chooseByName(event.target.value))}
-                  />
-                </Field>
-                <datalist id="known-customers">
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.name} />
-                  ))}
-                </datalist>
-                <Field id="buyer.email" label={t("email")} error={fieldErrors["buyer.email"]}>
-                  <input type="email" value={customer.email} onChange={(event) => setCustomerField({ email: event.target.value })} />
-                </Field>
-                <Field id="buyer.street" label={t("street")} error={fieldErrors["buyer.street"]}>
-                  <input
-                    value={customer.street}
-                    onChange={(event) => setCustomerField({ street: event.target.value })}
-                  />
-                </Field>
-                <div className="form-pair">
-                  <Field id="buyer.postcode" label={t("postcode")}>
-                    <input value={customer.postcode} onChange={(event) => setCustomerField({ postcode: event.target.value })} />
-                  </Field>
-                  <Field id="buyer.city" label={t("city")}>
-                    <input value={customer.city} onChange={(event) => setCustomerField({ city: event.target.value })} />
-                  </Field>
-                </div>
-                <Field id="buyer.type" label={t("customerType")} unsure={flag("customer_is_business")}>
-                  <select value={customer.is_business ? "b" : "p"} onChange={(event) => setCustomerField({ is_business: event.target.value === "b" })}>
-                    <option value="b">{t("typeBusiness")}</option>
-                    <option value="p">{t("typePrivate")}</option>
-                  </select>
-                </Field>
-                <Field id="buyer.language" label={t("customerLanguage")} hint={t("customerLanguageHint")}>
-                  <select value={customer.language} onChange={(event) => setCustomerField({ language: event.target.value })}>
-                    <option value="de">{t("langGerman")}</option>
-                    <option value="en">{t("langEnglish")}</option>
-                  </select>
-                </Field>
-              </div>
-            )}
-
-            <h3>{t("workSection")}</h3>
-            <div className="lines">
-              {lines.map((line, index) => {
-                const position = index + 1;
-                return (
-                  <div className="line" key={index}>
-                    <Field
-                      id={`lines.${position}.description`}
-                      label={t("what")}
-                      unsure={flag(`lines.${index}.description`)}
-                      error={fieldErrors[`lines.${position}.description`]}
-                    >
-                      <input value={line.description} onChange={(event) => setLine(index, { description: event.target.value })} />
-                    </Field>
-                    <Field
-                      id={`lines.${position}.quantity`}
-                      label={t("qty")}
-                      unsure={flag(`lines.${index}.quantity`)}
-                      error={fieldErrors[`lines.${position}.quantity`]}
-                    >
-                      <input inputMode="decimal" value={line.quantity} onChange={(event) => setLine(index, { quantity: event.target.value })} />
-                    </Field>
-                    <Field id={`lines.${position}.unit`} label={t("unit")}>
-                      <select value={line.unit} onChange={(event) => setLine(index, { unit: event.target.value })}>
-                        <option value="HUR">{t("unitHours")}</option>
-                        <option value="H87">{t("unitPieces")}</option>
-                      </select>
-                    </Field>
-                    <Field
-                      id={`lines.${position}.price`}
-                      label={t("netPrice")}
-                      unsure={flag(`lines.${index}.unit_price`)}
-                      error={fieldErrors[`lines.${position}.price`]}
-                    >
-                      <input inputMode="decimal" value={line.price} onChange={(event) => setLine(index, { price: event.target.value })} />
-                    </Field>
-                    <Field id={`lines.${position}.vat`} label={t("vatPercent")} error={fieldErrors[`lines.${position}.vat`]}>
-                      {small ? (
-                        <select disabled value="0" title={t("smallBusinessNoVat")}>
-                          <option value="0">0</option>
-                        </select>
-                      ) : (
-                        <select value={line.vat} onChange={(event) => setLine(index, { vat: event.target.value })}>
-                          <option value="19">19</option>
-                          <option value="7">7</option>
-                        </select>
-                      )}
-                    </Field>
-                    <div className="line-total">
-                      <span className="line-total-label">{t("lineTotal")}</span>
-                      {eur(computed[index]?.net || 0)}
-                    </div>
-                    <button className="link line-remove" aria-label={t("removeItemLabel", { n: position })} onClick={() => removeLine(index)}>
-                      {t("removeItem")}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="button-row">
-              <button
-                id="add-item"
-                onClick={() => {
-                  setLines((all) => [...all, emptyLine()]);
-                  focusAfter.current = null;
-                  window.setTimeout(() => document.getElementById(`lines.${lines.length + 1}.description`)?.focus(), 0);
-                }}
-              >
-                {t("addItem")}
-              </button>
-              {small && <span className="muted small">{t("smallBusinessNoVat")}</span>}
-            </div>
-
-            <h3>{t("datesSection")}</h3>
-            <div className="form-grid three">
-              <Field id="issue_date" label={t("invoiceDate")} error={fieldErrors["issue_date"]}>
-                <input type="date" value={dates.issue} onChange={(event) => (setDates({ ...dates, issue: event.target.value }), clearField("issue_date"))} />
-              </Field>
-              <div>
-                <Field id="service_date" label={t("workDate")} unsure={flag("service_date")} error={fieldErrors["service_date"]}>
-                  <input
-                    type="date"
-                    value={dates.service}
-                    onChange={(event) => {
-                      setDates({ ...dates, service: event.target.value });
-                      setUnsure((u) => u.filter((f) => f !== "service_date"));
-                      clearField("service_date");
-                    }}
-                  />
-                </Field>
-                <div className="date-chips">
-                  {[
-                    [t("today"), 0],
-                    [t("yesterday"), -1],
-                  ].map(([label, shift]) => (
-                    <button
-                      key={label}
-                      className="small"
-                      type="button"
+                  <div className="button-row">
+                    <Button size="sm" icon="pencil" onClick={() => setCustomerOpen(true)}>
+                      {t("editDetails")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      tone="ghost"
                       onClick={() => {
-                        setDates({ ...dates, service: addDays(clock(), shift as number) });
+                        setCustomer({ ...EMPTY_CUSTOMER, language: lang });
+                        setCustomerOpen(true);
+                        focusAfter.current = "buyer.name";
+                      }}
+                    >
+                      {t("chooseAnother")}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <FieldGrid>
+                  <Field id="buyer.name" label={t("customerName")} help={customer.id ? undefined : t("customerNameHint")} unsure={flag("customer_name")} error={fieldErrors["buyer.name"]} emphasis>
+                    <input
+                      list="known-customers"
+                      autoComplete="off"
+                      value={customer.name}
+                      onChange={(event) => (customer.id ? setCustomerField({ name: event.target.value }) : chooseByName(event.target.value))}
+                    />
+                  </Field>
+                  <datalist id="known-customers">
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.name} />
+                    ))}
+                  </datalist>
+                  <Field id="buyer.email" label={t("email")} error={fieldErrors["buyer.email"]}>
+                    <input type="email" value={customer.email} onChange={(event) => setCustomerField({ email: event.target.value })} />
+                  </Field>
+                  <Field id="buyer.street" label={t("street")} error={fieldErrors["buyer.street"]}>
+                    <input value={customer.street} onChange={(event) => setCustomerField({ street: event.target.value })} />
+                  </Field>
+                  <div className="field-pair">
+                    <Field id="buyer.postcode" label={t("postcode")}>
+                      <input value={customer.postcode} onChange={(event) => setCustomerField({ postcode: event.target.value })} />
+                    </Field>
+                    <Field id="buyer.city" label={t("city")}>
+                      <input value={customer.city} onChange={(event) => setCustomerField({ city: event.target.value })} />
+                    </Field>
+                  </div>
+                  <Field id="buyer.type" label={t("customerType")} unsure={flag("customer_is_business")}>
+                    <select value={customer.is_business ? "b" : "p"} onChange={(event) => setCustomerField({ is_business: event.target.value === "b" })}>
+                      <option value="b">{t("typeBusiness")}</option>
+                      <option value="p">{t("typePrivate")}</option>
+                    </select>
+                  </Field>
+                  <Field id="buyer.language" label={t("customerLanguage")} help={t("customerLanguageHint")}>
+                    <select value={customer.language} onChange={(event) => setCustomerField({ language: event.target.value })}>
+                      <option value="de">{t("langGerman")}</option>
+                      <option value="en">{t("langEnglish")}</option>
+                    </select>
+                  </Field>
+                </FieldGrid>
+              )}
+            </div>
+
+            <div className="form-section">
+              <h3 className="section-label">{t("workSection")}</h3>
+              <div className="lines">
+                <div className="lines-head" aria-hidden="true">
+                  <span>{t("what")}</span>
+                  <span>{t("qty")}</span>
+                  <span>{t("unit")}</span>
+                  <span>{t("netPrice")}</span>
+                  <span>{t("vatPercent")}</span>
+                  <span className="num">{t("lineTotal")}</span>
+                  <span />
+                </div>
+                {lines.map((line, index) => {
+                  const position = index + 1;
+                  return (
+                    <div className="line" key={index}>
+                      <Field
+                        id={`lines.${position}.description`}
+                        label={t("what")}
+                        labelHidden="md"
+                        unsure={flag(`lines.${index}.description`)}
+                        error={fieldErrors[`lines.${position}.description`]}
+                      >
+                        <input value={line.description} onChange={(event) => setLine(index, { description: event.target.value })} />
+                      </Field>
+                      <Field id={`lines.${position}.quantity`} label={t("qty")} labelHidden="md" unsure={flag(`lines.${index}.quantity`)} error={fieldErrors[`lines.${position}.quantity`]}>
+                        <input inputMode="decimal" value={line.quantity} onChange={(event) => setLine(index, { quantity: event.target.value })} />
+                      </Field>
+                      <Field id={`lines.${position}.unit`} label={t("unit")} labelHidden="md">
+                        <select value={line.unit} onChange={(event) => setLine(index, { unit: event.target.value })}>
+                          <option value="HUR">{t("unitHours")}</option>
+                          <option value="H87">{t("unitPieces")}</option>
+                        </select>
+                      </Field>
+                      <Field id={`lines.${position}.price`} label={t("netPrice")} labelHidden="md" unsure={flag(`lines.${index}.unit_price`)} error={fieldErrors[`lines.${position}.price`]}>
+                        <input inputMode="decimal" value={line.price} onChange={(event) => setLine(index, { price: event.target.value })} />
+                      </Field>
+                      <Field id={`lines.${position}.vat`} label={t("vatPercent")} labelHidden="md" error={fieldErrors[`lines.${position}.vat`]}>
+                        {small ? (
+                          <select disabled value="0">
+                            <option value="0">0</option>
+                          </select>
+                        ) : (
+                          <select value={line.vat} onChange={(event) => setLine(index, { vat: event.target.value })}>
+                            <option value="19">19</option>
+                            <option value="7">7</option>
+                          </select>
+                        )}
+                      </Field>
+                      <div className="line-net">
+                        <span className="line-net-label">{t("lineTotal")}</span>
+                        <strong>{eur(computed[index]?.net || 0)}</strong>
+                      </div>
+                      <Button tone="ghost" icon="trash" iconOnly className="line-remove" onClick={() => removeLine(index)}>
+                        {t("removeItemLabel", { n: position })}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="button-row">
+                <Button
+                  id="add-item"
+                  icon="plus"
+                  onClick={() => {
+                    setLines((all) => [...all, emptyLine()]);
+                    focusAfter.current = null;
+                    window.setTimeout(() => document.getElementById(`lines.${lines.length + 1}.description`)?.focus(), 0);
+                  }}
+                >
+                  {t("addItem")}
+                </Button>
+                {small && <Badge icon="info">{t("smallBusinessNoVat")}</Badge>}
+              </div>
+            </div>
+
+            <div className="form-section">
+              <h3 className="section-label">{t("datesSection")}</h3>
+              <FieldGrid columns={3}>
+                <Field id="issue_date" label={t("invoiceDate")} error={fieldErrors["issue_date"]}>
+                  <input type="date" value={dates.issue} onChange={(event) => (setDates({ ...dates, issue: event.target.value }), clearField("issue_date"))} />
+                </Field>
+                <div className="field-with-chips">
+                  <Field id="service_date" label={t("workDate")} unsure={flag("service_date")} error={fieldErrors["service_date"]}>
+                    <input
+                      type="date"
+                      value={dates.service}
+                      onChange={(event) => {
+                        setDates({ ...dates, service: event.target.value });
                         setUnsure((u) => u.filter((f) => f !== "service_date"));
                         clearField("service_date");
                       }}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                    />
+                  </Field>
+                  <div className="date-chips">
+                    {[
+                      [t("today"), 0],
+                      [t("yesterday"), -1],
+                    ].map(([label, shift]) => (
+                      <Button
+                        key={label}
+                        size="sm"
+                        onClick={() => {
+                          setDates({ ...dates, service: addDays(clock(), shift as number) });
+                          setUnsure((u) => u.filter((f) => f !== "service_date"));
+                          clearField("service_date");
+                        }}
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <Field id="due_date" label={t("paymentDue")} error={fieldErrors["due_date"]}>
-                  <input type="date" value={dates.due} onChange={(event) => (setDates({ ...dates, due: event.target.value }), clearField("due_date"))} />
-                </Field>
-                <div className="date-chips">
-                  {[7, 14, 30].map((days) => (
-                    <button
-                      key={days}
-                      className="small"
-                      type="button"
-                      onClick={() => {
-                        setDates({ ...dates, due: addDays(dates.issue || clock(), days) });
-                        clearField("due_date");
-                      }}
-                    >
-                      {t("inDays", { n: days })}
-                    </button>
-                  ))}
+                <div className="field-with-chips">
+                  <Field id="due_date" label={t("paymentDue")} error={fieldErrors["due_date"]}>
+                    <input type="date" value={dates.due} onChange={(event) => (setDates({ ...dates, due: event.target.value }), clearField("due_date"))} />
+                  </Field>
+                  <div className="date-chips">
+                    {[7, 14, 30].map((days) => (
+                      <Button
+                        key={days}
+                        size="sm"
+                        onClick={() => {
+                          setDates({ ...dates, due: addDays(dates.issue || clock(), days) });
+                          clearField("due_date");
+                        }}
+                      >
+                        {t("inDays", { n: days })}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              </FieldGrid>
+              <Switch id="property-work" label={t("propertyWork")} checked={propertyWork} onChange={(event) => setPropertyWork(event.target.checked)} />
             </div>
-            <label className="check">
-              <input type="checkbox" checked={propertyWork} onChange={(event) => setPropertyWork(event.target.checked)} />
-              {t("propertyWork")}
-            </label>
           </section>
 
           <div className="action-bar">
-            <button onClick={() => setStep("note")}>{t("back")}</button>
+            <Button tone="ghost" icon="arrow-left" onClick={() => setStep("note")}>
+              {t("back")}
+            </Button>
             <div className="sums" aria-live="polite">
               <span>
                 {t("net")} <strong>{eur(sums.net)}</strong>
@@ -763,44 +782,63 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
                 {t("total")} <strong>{eur(sums.gross)}</strong>
               </span>
             </div>
-            <button className="primary big" disabled={busy || lines.length === 0} aria-busy={busy} onClick={saveAndCheck}>
-              <BusyLabel busy={busy} label={t("checkInvoice")} pending={t("checking")} />
-            </button>
+            <Button tone="primary" size="lg" iconEnd="arrow-right" busy={busy} pending={t("checking")} disabled={lines.length === 0} onClick={saveAndCheck}>
+              {t("checkInvoice")}
+            </Button>
           </div>
-        </div>
+        </>
       )}
 
       {step === "check" && check && (
         <>
-          <section className="card">
-            <h2 ref={heading} tabIndex={-1}>
-              {t("checkTitle")}
-            </h2>
-            {check.issues.length === 0 && <p>{t("noProblems")}</p>}
-            <ul className="issues">
-              {check.issues.map((issue: any) => {
-                const seller = issue.field.startsWith("seller");
-                const target = targetOf(issue.field);
-                return (
-                  <li key={`${issue.rule_id}-${issue.field}`} className={issue.severity}>
-                    <span className="issue-tag">{issue.severity === "error" ? `! ${t("mustFix")}` : issue.severity === "warning" ? `! ${t("lookAt")}` : `i ${t("noteTag")}`}</span>
-                    <div>
-                      <strong>{issue.message}</strong>
-                      <div className="small">{issue.fix}</div>
-                      <div className="muted small">{issue.law}</div>
-                    </div>
-                    {issue.severity === "error" &&
-                      (seller ? (
-                        <a className="button" href="#/settings">
-                          {t("openSettings")}
-                        </a>
-                      ) : target ? (
-                        <button onClick={() => goToField(issue.field)}>{t("goToField")}</button>
-                      ) : null)}
-                  </li>
-                );
-              })}
-            </ul>
+          <section className="card" aria-labelledby="check-title">
+            <div className="card-head">
+              <h2 id="check-title" ref={heading} tabIndex={-1}>
+                {t("checkTitle")}
+              </h2>
+              {toFix > 0 ? (
+                <Badge tone="bad" icon="circle-x">
+                  {t("toFixCount", { n: toFix })}
+                </Badge>
+              ) : (
+                <Badge tone="good" icon="circle-check">
+                  {t("readyToIssue")}
+                </Badge>
+              )}
+            </div>
+            {check.issues.length === 0 && <Alert tone="good">{t("noProblems")}</Alert>}
+            {check.issues.length > 0 && (
+              <ul className="issues">
+                {check.issues.map((issue: any) => {
+                  const seller = issue.field.startsWith("seller");
+                  const target = targetOf(issue.field);
+                  const kind = SEVERITY[issue.severity] || SEVERITY.info;
+                  return (
+                    <li key={`${issue.rule_id}-${issue.field}`} className={cx("issue", issue.severity)}>
+                      <span className="issue-icon">
+                        <Icon name={kind.icon} />
+                      </span>
+                      <div className="issue-body">
+                        <span className="issue-tag">{t(kind.tag)}</span>
+                        <strong>{issue.message}</strong>
+                        <span className="small">{issue.fix}</span>
+                        <span className="muted small">{issue.law}</span>
+                      </div>
+                      {issue.severity === "error" &&
+                        (seller ? (
+                          <ButtonLink size="sm" icon="settings" href="#/settings">
+                            {t("openSettings")}
+                          </ButtonLink>
+                        ) : target ? (
+                          <Button size="sm" icon="pencil" onClick={() => goToField(issue.field)}>
+                            {t("goToField")}
+                          </Button>
+                        ) : null)}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
             {check.notes_to_print.length > 0 && (
               <div className="printed-notes">
                 <strong>{t("printedNotes")}</strong>
@@ -814,13 +852,12 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
           </section>
 
           {check.can_issue && (
-            <section className="card summary-card">
-              <h2>{t("summary")}</h2>
+            <SectionCard title={t("summary")} icon="receipt-text">
               <dl className="facts">
                 <dt>{t("customer")}</dt>
                 <dd>{customer.name}</dd>
                 <dt>{t("sentTo")}</dt>
-                <dd>{customer.email}</dd>
+                <dd>{customer.email || "-"}</dd>
                 <dt>{t("invoiceLanguage")}</dt>
                 <dd>{customer.language === "en" ? t("langEnglish") : t("langGerman")}</dd>
                 <dt>{t("paymentDue")}</dt>
@@ -829,34 +866,35 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
                 <dd className="tabular">{eur(sums.net)}</dd>
                 <dt>{t("vat")}</dt>
                 <dd className="tabular">{eur(sums.vat)}</dd>
-                <dt>
-                  <strong>{t("total")}</strong>
-                </dt>
-                <dd className="tabular">
-                  <strong>{eur(sums.gross)}</strong>
-                </dd>
+                <dt className="strong">{t("total")}</dt>
+                <dd className="tabular strong">{eur(sums.gross)}</dd>
               </dl>
-              <p className="muted small issue-hint">{t("issueHint")}</p>
-            </section>
+              <p className="muted small">{t("issueHint")}</p>
+            </SectionCard>
           )}
 
           <div className="action-bar">
-            <button onClick={() => setStep("details")}>{t("back")}</button>
+            <Button tone="ghost" icon="arrow-left" onClick={() => setStep("details")}>
+              {t("back")}
+            </Button>
             {check.can_issue ? (
-              <button className="primary big" disabled={busy} aria-busy={busy} onClick={issue}>
-                <BusyLabel busy={busy} label={t("issueInvoice")} pending={t("issuing")} />
-              </button>
+              <Button tone="primary" size="lg" icon="send" busy={busy} pending={t("issuing")} onClick={issue}>
+                {t("issueInvoice")}
+              </Button>
             ) : (
               <>
-                <span className="note-unsure">! {t("fixFirst")}</span>
+                <span className="action-note">
+                  <Icon name="triangle-exclamation-point" size="sm" />
+                  {t("fixFirst")}
+                </span>
                 {firstFixable ? (
-                  <button className="primary big" onClick={() => goToField(firstFixable.field)}>
+                  <Button tone="primary" size="lg" icon="pencil" onClick={() => goToField(firstFixable.field)}>
                     {t("goToField")}
-                  </button>
+                  </Button>
                 ) : (
-                  <button className="primary big" disabled={busy} aria-busy={busy} onClick={saveAndCheck}>
-                    {busy ? t("checking") : t("checkAgain")}
-                  </button>
+                  <Button tone="primary" size="lg" icon="refresh-cw" busy={busy} pending={t("checking")} onClick={saveAndCheck}>
+                    {t("checkAgain")}
+                  </Button>
                 )}
               </>
             )}
@@ -865,29 +903,39 @@ export function NewInvoice({ hash, refresh }: { hash: string; refresh: () => voi
       )}
 
       {step === "done" && issued && (
-        <section className="card done-card">
-          <Empty
-            title={`✓ ${t("doneTitle", { number: issued.number })}`}
+        <section className="card done-card" aria-labelledby="done-title">
+          <EmptyState
+            icon="circle-check"
+            tone="good"
+            heading
+            titleId="done-title"
+            title={t("doneTitle", { number: issued.number })}
             hint={
               <>
                 {t("doneNext")} {elapsed !== null && t("doneTime", { time: duration(elapsed) })}
               </>
             }
+            action={
+              <div className="button-row center-row">
+                <ButtonLink tone="primary" icon="download" href={`/api/invoices/${issued.id}/pdf`}>
+                  {t("downloadPdf")}
+                </ButtonLink>
+                <Button icon="copy" onClick={() => copyLink(customerLink(issued.public_token))}>
+                  {t("copyLink")}
+                </Button>
+                <ButtonLink icon="receipt-text" href={`#/invoices/${issued.id}`}>
+                  {t("openInvoice")}
+                </ButtonLink>
+                <Button tone="ghost" icon="file-plus" onClick={startOver}>
+                  {t("anotherInvoice")}
+                </Button>
+              </div>
+            }
           />
-          <div className="button-row center-row">
-            <a className="button primary" href={`/api/invoices/${issued.id}/pdf`}>
-              {t("downloadPdf")}
-            </a>
-            <button onClick={() => copyLink(customerLink(issued.public_token))}>{t("copyLink")}</button>
-            <a className="button" href={`#/invoices/${issued.id}`}>
-              {t("openInvoice")}
-            </a>
-            <button onClick={startOver}>{t("anotherInvoice")}</button>
-          </div>
           <span className="sr-only">{labels.status[issued.status]}</span>
         </section>
       )}
-    </>
+    </Page>
   );
 }
 

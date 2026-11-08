@@ -2,7 +2,8 @@
    Everything else reads these through var(). Rules: docs/UI-RULES-APPLIED.md */
 
 :root {
-  /* Palette: 23 colours and white. Status colours carry meaning only. */
+  /* Palette: primary and neutral 50-900, success, warning and error at 100/500/700, and white.
+     Status colours carry meaning only. Mixes below are computed from these, never new colours. */
   --white: #ffffff;
   --primary-50: #eef4ff;
   --primary-100: #dce7ff;
@@ -29,54 +30,73 @@
   --success-700: #137442;
   --warning-100: #fff1d6;
   --warning-500: #e39a12;
-  --warning-700: #975f00; /* one step darker than the rules file, so warning text passes 4.5:1 on the new page shade */
+  --warning-700: #975f00; /* one step darker than the rules file, so warning text passes 4.5:1 on the tinted page */
   --error-100: #fde2e2;
   --error-500: #dd3636;
   --error-700: #a82424;
 
   /* Roles, light. A screen names a role, never a shade. */
   color-scheme: light;
-  /* The page is a shade darker than the cards, so white cards stand out from it. */
-  --canvas: var(--neutral-100);
+  /* The page has a faint blue tint, so white cards stand out and the page never looks flat. */
+  --canvas: color-mix(in srgb, var(--primary-50) 45%, var(--neutral-100));
   --surface: var(--white);
   --raised: var(--white);
   --sunken: var(--neutral-100);
+  --paper: var(--white);
+  --band: color-mix(in srgb, var(--primary-50) 60%, var(--neutral-50));
+  --brand-surface: color-mix(in srgb, var(--primary-50) 70%, var(--white));
+  --brand-line: var(--primary-200);
   --line: var(--neutral-200);
   --line-strong: var(--neutral-300);
   --text: var(--neutral-900);
   --text-muted: var(--neutral-600);
   --placeholder: var(--neutral-500);
   --link: var(--primary-600);
+  --brand: var(--primary-600);
   --focus: var(--primary-500);
   --primary: var(--primary-500);
   --primary-hover: var(--primary-600);
   --primary-pressed: var(--primary-700);
   --on-primary: var(--white);
-  --selected-bg: var(--primary-100);
+  --selected-bg: var(--primary-50);
   --selected-text: var(--primary-700);
+  --selected-line: var(--primary-200);
   --hover-bg: var(--neutral-100);
+  --disabled-bg: var(--neutral-100);
+  --disabled-text: var(--neutral-400);
+  --disabled-line: var(--neutral-200);
+  --tile-bg: var(--primary-50);
+  --tile-text: var(--primary-600);
   --bar: var(--primary-500);
-  --bar-bg: var(--neutral-200);
+  /* "At risk" bars. Below 3:1 on white, so every risk bar carries its word, value and icon (dataviz check, 9 Nov). */
+  --risk-bar: var(--warning-500);
+  --track: var(--neutral-100);
   --good-bg: var(--success-100);
   --good-text: var(--success-700);
   --good-mark: var(--success-500);
+  --good-line: color-mix(in srgb, var(--success-500) 40%, var(--success-100));
   --warn-bg: var(--warning-100);
   --warn-text: var(--warning-700);
   --warn-mark: var(--warning-500);
+  --warn-line: color-mix(in srgb, var(--warning-500) 45%, var(--warning-100));
   --bad-bg: var(--error-100);
   --bad-text: var(--error-700);
   --bad-mark: var(--error-500);
-  --info-bg: var(--primary-100);
+  --bad-line: color-mix(in srgb, var(--error-500) 40%, var(--error-100));
+  --info-bg: var(--primary-50);
   --info-text: var(--primary-700);
+  --info-line: var(--primary-200);
   --scrim: color-mix(in srgb, var(--neutral-900) 45%, transparent);
+  --tooltip-bg: var(--neutral-900);
+  --tooltip-text: var(--neutral-50);
   --toast-bg: var(--neutral-900);
   --toast-text: var(--neutral-50);
   --toast-error-bg: var(--error-700);
   --toast-error-text: var(--white);
   --changed-row: var(--primary-50);
 
-  /* Type: one family. System fonts, so nothing is requested from another site. */
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Type: one family, Inter, served from this app (fonts.css), with a size-matched fallback */
+  --font: "Inter Variable", "Inter Fallback", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
   --text-2xs: 11px;
   --line-2xs: 16px;
@@ -96,10 +116,13 @@
   --line-2xl: 32px;
   --text-3xl: 30px;
   --line-3xl: 36px;
+  --line-tight: 1;
   --weight-normal: 400;
   --weight-medium: 500;
   --weight-semibold: 600;
   --weight-bold: 700;
+  --tracking-tight: -0.011em; /* headings and big figures read tighter in Inter */
+  --tracking-wide: 0.06em; /* small capital labels */
 
   /* Spacing: one 4px rhythm, named steps. PaidLoop is for small business owners, not a dense ERP,
      so the comfortable steps are roomy (rules file, section 24). Compact density keeps the tight values. */
@@ -113,14 +136,46 @@
   --space-dialog: 20px;
   --space-gutter: 16px;
   --space-indent: 12px;
+
+  /* Sizes: heights, icons and widths. Nothing else in the code writes a size. */
   --size-control: 40px;
   --size-target: 44px;
   --size-row: 40px;
   --size-toolbar: 28px;
   --size-topbar: 64px;
-  --size-icon: 16px;
+  --size-strip: 40px;
+  --size-mark: 24px;
+  --size-tile-sm: 32px;
+  --size-tile-icon: 40px;
+  --size-tile-lg: 48px;
+  --switch-width: 36px;
+  --switch-height: 20px;
+  --size-bar: 12px;
+  --size-chat: 360px;
+  --icon-xs: 12px;
+  --icon-sm: 14px;
+  --icon-md: 16px;
+  --icon-lg: 20px;
+  --icon-stroke: 2;
   --measure-page: 1200px;
+  --measure-form: 960px;
   --measure-narrow: 560px;
+  --measure-popover: 360px;
+  --measure-dialog: 480px;
+  --measure-menu: 260px;
+  --measure-drawer: 320px;
+  --measure-search: 360px;
+  --measure-toast: 416px;
+  --measure-amount: 200px;
+  --col-bar-label: 160px;
+  --col-bar-value: 104px;
+  --col-qty: 72px;
+  --col-unit: 112px;
+  --col-price: 120px;
+  --col-vat: 88px;
+  --col-net: 104px;
+  --col-tag: 112px;
+  --col-time: 152px;
 
   /* Shape and depth */
   --radius: 6px;
@@ -128,11 +183,12 @@
   --radius-alert: 8px;
   --radius-dialog: 12px;
   --radius-inner: 3px;
+  --radius-round: 999px; /* dots, step marks and the spinner only */
   --hairline: 1px;
   --ring: 2px;
-  --elev-sm: 0 1px 2px color-mix(in srgb, var(--neutral-900) 10%, transparent);
-  --elev-md: 0 4px 16px color-mix(in srgb, var(--neutral-900) 16%, transparent);
-  --elev-floating: 0 -2px 12px color-mix(in srgb, var(--neutral-900) 10%, transparent);
+  --elev-sm: 0 1px 2px color-mix(in srgb, var(--neutral-900) 8%, transparent);
+  --elev-md: 0 8px 24px color-mix(in srgb, var(--neutral-900) 14%, transparent), 0 1px 3px color-mix(in srgb, var(--neutral-900) 8%, transparent);
+  --elev-floating: 0 -4px 16px color-mix(in srgb, var(--neutral-900) 8%, transparent);
 
   /* Layers: five, and nothing above a toast */
   --z-sticky: 10;
@@ -181,6 +237,7 @@
   --space-gutter: 8px;
   --size-control: 30px;
   --size-row: 32px;
+  --size-strip: 32px;
 }
 
 @media (max-width: 1023px) {
@@ -193,16 +250,21 @@
 /* Dark theme: the same colours with their roles swapped */
 [data-theme="dark"] {
   color-scheme: dark;
-  --canvas: var(--neutral-900);
+  --canvas: color-mix(in srgb, var(--primary-900) 20%, var(--neutral-900));
   --surface: var(--neutral-800);
   --raised: var(--neutral-700);
   --sunken: var(--neutral-900);
+  --paper: var(--neutral-800);
+  --band: color-mix(in srgb, var(--primary-900) 40%, var(--neutral-800));
+  --brand-surface: color-mix(in srgb, var(--primary-900) 55%, var(--neutral-800));
+  --brand-line: var(--primary-800);
   --line: var(--neutral-700);
   --line-strong: var(--neutral-600);
   --text: var(--neutral-50);
   --text-muted: var(--neutral-300);
   --placeholder: var(--neutral-400);
   --link: var(--primary-300);
+  --brand: var(--primary-300);
   --focus: var(--primary-300);
   --primary: var(--primary-400);
   --primary-hover: var(--primary-300);
@@ -210,19 +272,34 @@
   --on-primary: var(--neutral-900);
   --selected-bg: var(--primary-900);
   --selected-text: var(--primary-100);
+  --selected-line: var(--primary-700);
   --hover-bg: var(--neutral-700);
+  --disabled-bg: var(--neutral-800);
+  --disabled-text: var(--neutral-500);
+  --disabled-line: var(--neutral-700);
+  --tile-bg: var(--primary-900);
+  --tile-text: var(--primary-200);
   --bar: var(--primary-400);
-  --bar-bg: var(--neutral-700);
-  --good-bg: var(--neutral-700);
+  /* Dark mode gets its own step: plain warning-500 is too light for the dark lightness band (dataviz check). */
+  --risk-bar: color-mix(in srgb, var(--warning-500) 85%, var(--neutral-900));
+  --track: var(--neutral-700);
+  --good-bg: color-mix(in srgb, var(--success-700) 30%, var(--neutral-800));
   --good-text: var(--success-100);
-  --warn-bg: var(--neutral-700);
+  --good-line: color-mix(in srgb, var(--success-500) 45%, var(--neutral-800));
+  --warn-bg: color-mix(in srgb, var(--warning-700) 30%, var(--neutral-800));
   --warn-text: var(--warning-100);
-  --bad-bg: var(--neutral-700);
+  --warn-line: color-mix(in srgb, var(--warning-500) 45%, var(--neutral-800));
+  --bad-bg: color-mix(in srgb, var(--error-700) 30%, var(--neutral-800));
   --bad-text: var(--error-100);
+  --bad-line: color-mix(in srgb, var(--error-500) 45%, var(--neutral-800));
   --info-bg: var(--primary-900);
   --info-text: var(--primary-100);
+  --info-line: var(--primary-700);
+  --tooltip-bg: var(--neutral-50);
+  --tooltip-text: var(--neutral-900);
   --toast-bg: var(--neutral-50);
   --toast-text: var(--neutral-900);
   --changed-row: var(--primary-900);
+  --elev-sm: none;
   --elev-floating: none;
 }

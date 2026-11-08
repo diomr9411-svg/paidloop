@@ -1,6 +1,7 @@
 // Walks every screen at 5 widths in a real Chrome, with no extra packages except axe-core.
+// The screens come from src/routes.ts, so a new screen is walked without editing this file.
 // Needs the app running (default http://127.0.0.1:8000) with demo data.
-// Run: npm run walk            (SHOTS=folder saves a few screenshots)
+// Run: npm run walk            (SHOTS=folder saves screenshots, FULL=1 makes them whole pages)
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,18 +28,17 @@ const open = list.find((row) => row.status === "issued");
 const paid = list.find((row) => row.status === "paid");
 if (!open) throw new Error("No open invoice. Reset the demo data first.");
 const token = (await api(`/api/invoices/${open.id}`)).public_token;
+// Every screen comes from the one route list (src/routes.ts); a record in the address is filled in from the demo data.
+const routeList = readFileSync(new URL("../src/routes.ts", import.meta.url), "utf8");
+const fromRoutes = [...routeList.matchAll(/\{ id: "([\w-]+)", hash: "([^"]+)"/g)].map(([, id, hash]) => [id, hash.replace("{id}", String(open.id)).replace("{token}", token)]);
+if (fromRoutes.length < 8) throw new Error("Could not read the route list in src/routes.ts");
 const ROUTES = [
-  ["home", "#/"],
-  ["new", "#/new"],
+  ...fromRoutes,
+  // A few more states of the same screens
   ["new-details", "#/new", "details"],
-  ["invoices", "#/invoices"],
   ["invoices-open", "#/invoices?filter=open"],
-  ["invoice-open", `#/invoices/${open.id}`],
   ...(paid ? [["invoice-paid", `#/invoices/${paid.id}`]] : []),
-  ["approvals", "#/approvals"],
-  ["audit", "#/audit"],
-  ["settings", "#/settings"],
-  ["customer-page", `#/pay/${token}`],
+  ["settings-connections", "#/settings/connections"],
 ];
 const VARIANTS = [
   { name: "light, English", widths: WIDTHS, lang: "en", theme: "light" },
@@ -122,7 +122,7 @@ const PAGE_CHECKS = `(async () => {
   out.theme = root.getAttribute("data-theme");
   const small = [];
   if (window.innerWidth < 768) {
-    for (const el of document.querySelectorAll("button, input:not([type=hidden]):not([type=checkbox]), select, textarea, .button, .topbar nav a, .filter")) {
+    for (const el of document.querySelectorAll("button, a.btn, input:not([type=hidden]):not([type=checkbox]), select, textarea, .nav-link, .tab, .segment")) {
       const box = el.getBoundingClientRect();
       if (box.width === 0 || box.height === 0 || el.closest("[hidden]") || el.classList.contains("sr-only")) continue;
       if (getComputedStyle(el).visibility === "hidden") continue;
@@ -172,8 +172,9 @@ for (const variant of VARIANTS) {
         }
       }
       if (step === "details") {
-        await evaluate(`[...document.querySelectorAll("button")].find((b) => /By hand|Von Hand/.test(b.textContent))?.click()`);
-        await sleep(300);
+        const opened = await evaluate(`(() => { const b = [...document.querySelectorAll("button")].find((b) => /by hand|von hand/i.test(b.textContent)); b?.click(); return !!b; })()`);
+        if (!opened) throw new Error("The 'Enter by hand' button was not found, so the details step can't be walked");
+        for (let i = 0; i < 20 && !(await evaluate(`!!document.getElementById("buyer.name")`)); i++) await sleep(100);
       }
       await sleep(250);
       let result;
@@ -190,16 +191,18 @@ for (const variant of VARIANTS) {
         if (result.clipped.length) problems.push(`content past the right edge: ${result.clipped.join(", ")}`);
         if (result.h1 !== 1) problems.push(`${result.h1} h1 elements`);
         if (result.mainText < 20) problems.push("page looks empty");
-        if (result.lang !== variant.lang && name !== "customer-page") problems.push(`html lang is "${result.lang}", expected "${variant.lang}"`);
+        if (result.lang !== variant.lang && name !== "pay") problems.push(`html lang is "${result.lang}", expected "${variant.lang}"`);
         if (result.theme !== variant.theme) problems.push(`theme is ${result.theme}, expected ${variant.theme}`);
         if (result.smallCount) problems.push(`${result.smallCount} touch targets under 40px, e.g. ${result.small.slice(0, 3).join("; ")}`);
         for (const violation of result.axe) problems.push(`axe ${violation}`);
       }
       for (const error of [...new Set(errors)]) problems.push(`console error: ${String(error).slice(0, 140)}`);
 
-      if (SHOTS && ["home", "invoices", "invoice-open", "new-details", "customer-page"].includes(name) && [375, 1440].includes(width)) {
+      if (SHOTS && [375, 1440].includes(width) && (variant.name === "light, English" || ["home", "invoice", "pay", "design"].includes(name))) {
         mkdirSync(SHOTS, { recursive: true });
-        const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+        // FULL=1 saves the whole page, not just the first screen
+        const height = process.env.FULL ? Math.min(await evaluate("document.documentElement.scrollHeight"), 6000) : 800;
+        const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: !!process.env.FULL, clip: { x: 0, y: 0, width, height, scale: 1 } });
         writeFileSync(join(SHOTS, `${variant.name.replace(/\W+/g, "_")}_${width}_${name}.png`), Buffer.from(shot.data, "base64"));
       }
       rows.push({ variant: variant.name, width, name, ok: problems.length === 0 });

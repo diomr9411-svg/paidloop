@@ -1,8 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "../api";
-import { Empty, ErrorBox, Loading, PageHeader, Rereading, StatusPill } from "../components";
 import { Key, useT } from "../i18n";
+import { ErrorBox } from "../ui/Alert";
+import { Badge } from "../ui/Badge";
+import { Button, ButtonLink } from "../ui/Button";
+import { EmptyState } from "../ui/EmptyState";
+import { Icon } from "../ui/Icon";
+import { Loading, Rereading } from "../ui/Loading";
+import { Page, PageHeader } from "../ui/PageHeader";
+import { SearchField } from "../ui/SearchField";
+import { FilterTabs } from "../ui/Tabs";
+import type { PageProps } from "../widgets/page";
+import { StatusBadge } from "../widgets/StatusBadge";
 
 const FILTERS: [string, Key][] = [
   ["all", "filterAll"],
@@ -55,19 +65,21 @@ function SortHeader({ name, label, view, change, numeric }: { name: string; labe
   const ascending = active && view.dir === "asc";
   return (
     <th scope="col" className={numeric ? "num" : ""} aria-sort={active ? (ascending ? "ascending" : "descending") : "none"}>
-      <button
-        className="sort"
+      <Button
+        tone="ghost"
+        size="sm"
+        className={ascending ? "sort asc" : "sort"}
+        iconEnd={active ? "chevron-down" : undefined}
         aria-label={t("sortBy", { name: label })}
         onClick={() => change({ sort: name, dir: active && !ascending ? "asc" : "desc", page: 1 })}
       >
         {label}
-        <span aria-hidden="true">{active ? (ascending ? " ▲" : " ▼") : ""}</span>
-      </button>
+      </Button>
     </th>
   );
 }
 
-export function Invoices({ version }: { version: number }) {
+export function Invoices({ version }: PageProps) {
   const { t, eur, day } = useT();
   const [view, setView] = useState<View>(readView);
   const [typed, setTyped] = useState(view.q);
@@ -93,7 +105,7 @@ export function Invoices({ version }: { version: number }) {
 
   // Search after a short pause in typing, not on every key.
   useEffect(() => {
-    if (typed === view.q) return;
+    if (typed.trim() === view.q) return;
     const timer = window.setTimeout(() => change({ q: typed.trim(), page: 1 }), 250);
     return () => window.clearTimeout(timer);
   }, [typed, view.q]);
@@ -133,87 +145,81 @@ export function Invoices({ version }: { version: number }) {
   const from = data.total === 0 ? 0 : (data.page - 1) * data.size + 1;
   const to = Math.min(data.page * data.size, data.total);
   const isFiltered = view.filter !== "all" || !!view.q;
+  const pages = Math.ceil(data.total / data.size);
 
   return (
-    <>
+    <Page template="list">
       <PageHeader
         title={t("invoices")}
         actions={
-          <a className="button primary" href="#/new">
+          <ButtonLink tone="primary" icon="file-plus" href="#/new">
             {t("newInvoice")}
-          </a>
+          </ButtonLink>
         }
       />
       {error && <ErrorBox text={error} />}
 
-      <div className="list-tools">
-        <div className="filters" role="group" aria-label={t("filterBy")}>
-          {FILTERS.map(([name, key]) => (
-            <button key={name} className={`filter ${view.filter === name ? "selected" : ""}`} aria-pressed={view.filter === name} onClick={() => change({ filter: name, page: 1 })}>
-              {t(key)} <span className="count">{data.counts[name] ?? 0}</span>
-            </button>
-          ))}
-        </div>
-        <div className="search">
-          <label className="sort-select">
-            <span className="sr-only">{t("sortLabel")}</span>
-            <select
-              value={`${view.sort}:${view.dir}`}
-              onChange={(event) => {
-                const [sort, dir] = event.target.value.split(":");
-                change({ sort, dir, page: 1 });
-              }}
-            >
-              {SORTS.map(([name, key]) => (
-                <option key={`${name}:desc`} value={`${name}:${name === "newest" ? "desc" : "asc"}`}>
-                  {t("sortLabel")}: {t(key)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <input
-            ref={search}
-            type="search"
-            aria-label={t("searchInvoices")}
-            placeholder={t("searchInvoices")}
-            value={typed}
-            maxLength={100}
-            onChange={(event) => setTyped(event.target.value)}
+      <section className="card flush list-card" aria-label={t("invoices")}>
+        <div className="list-toolbar">
+          <FilterTabs
+            label={t("filterBy")}
+            value={view.filter}
+            onChange={(filter) => change({ filter, page: 1 })}
+            options={FILTERS.map(([name, key]) => ({ value: name, label: t(key), count: data.counts[name] ?? 0 }))}
           />
+          <div className="list-toolbar-tools">
+            <SearchField id="invoice-search" ref={search} label={t("searchInvoices")} placeholder={t("searchPlaceholder")} value={typed} onChange={setTyped} />
+            <label className="sort-select">
+              <span className="sr-only">{t("sortLabel")}</span>
+              <select
+                value={`${view.sort}:${view.dir}`}
+                onChange={(event) => {
+                  const [sort, dir] = event.target.value.split(":");
+                  change({ sort, dir, page: 1 });
+                }}
+              >
+                {SORTS.map(([name, key]) => (
+                  <option key={name} value={`${name}:${name === "newest" ? "desc" : "asc"}`}>
+                    {t("sortLabel")}: {t(key)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
-      </div>
 
-      <Rereading active={fetching}>
-      {data.items.length === 0 ? (
-        <div className="card">
-          <Empty
-            title={isFiltered ? t("noMatches") : t("noInvoices")}
-            action={
-              isFiltered ? (
-                <button
-                  onClick={() => {
-                    setTyped("");
-                    change({ filter: "all", q: "", page: 1 });
-                  }}
-                >
-                  {t("clearFilters")}
-                </button>
-              ) : (
-                <a className="button primary" href="#/new">
-                  {t("newInvoice")}
-                </a>
-              )
-            }
-          />
-        </div>
-      ) : (
-        <>
-          <div className="card table-card">
-            <table className="clickable rtable sortable">
+        <Rereading active={fetching}>
+          {data.items.length === 0 ? (
+            <div className="card-pad">
+              <EmptyState
+                icon={isFiltered ? "search-x" : "receipt-text"}
+                title={isFiltered ? t("noMatches") : t("noInvoices")}
+                hint={isFiltered ? t("noMatchesHint") : t("noInvoicesHint")}
+                action={
+                  isFiltered ? (
+                    <Button
+                      icon="x"
+                      onClick={() => {
+                        setTyped("");
+                        change({ filter: "all", q: "", page: 1 });
+                      }}
+                    >
+                      {t("clearFilters")}
+                    </Button>
+                  ) : (
+                    <ButtonLink tone="primary" icon="file-plus" href="#/new">
+                      {t("newInvoice")}
+                    </ButtonLink>
+                  )
+                }
+              />
+            </div>
+          ) : (
+            <table className="rtable sortable clickable">
               <thead>
                 <tr>
-                  <SortHeader name="number" label={t("number")} view={view} change={change} />
                   <SortHeader name="customer" label={t("customer")} view={view} change={change} />
+                  <SortHeader name="number" label={t("number")} view={view} change={change} />
                   <SortHeader name="due" label={t("due")} view={view} change={change} />
                   <th scope="col">{t("status")}</th>
                   <SortHeader name="amount" label={t("total")} view={view} change={change} numeric />
@@ -227,28 +233,33 @@ export function Invoices({ version }: { version: number }) {
                   const draft = !row.number;
                   const href = draft ? `#/new?draft=${row.id}` : `#/invoices/${row.id}`;
                   return (
+                    // The whole row is a bigger mouse target; keyboard users open the same invoice through the link in its first cell.
                     <tr key={row.id} onClick={() => (window.location.hash = href)}>
-                      <td className="lead" data-label={t("number")}>
-                        <a href={href} onClick={(event) => event.stopPropagation()}>
-                          {row.number || t("draftNumber", { id: row.id })}
-                        </a>
-                        {row.has_pending && (
-                          <span className="pill warn small-pill" title={t("nowWaiting")}>
-                            !
-                          </span>
-                        )}
+                      <td className="lead" data-label="">
+                        <span className="cell-line">
+                          <a href={href} onClick={(event) => event.stopPropagation()}>
+                            {row.customer?.name || t("draftUnnamed")}
+                          </a>
+                          {row.has_pending && (
+                            <Badge tone="info" icon="inbox">
+                              {t("waitingShort")}
+                            </Badge>
+                          )}
+                        </span>
                       </td>
-                      <td data-label={t("customer")}>{row.customer?.name || "-"}</td>
+                      <td className="muted nowrap id" data-label={t("number")}>
+                        {row.number || t("draftNumber", { id: row.id })}
+                      </td>
                       <td className="nowrap" data-label={t("due")}>
                         {day(row.due_date)}
                       </td>
                       <td data-label={t("status")}>
-                        <StatusPill status={row.status} overdue={row.days_overdue} />
+                        <StatusBadge status={row.status} overdue={row.days_overdue} />
                       </td>
                       <td className="num" data-label={t("total")}>
                         {eur(row.gross_cents)}
                       </td>
-                      <td className="num" data-label={t("open")}>
+                      <td className="num strong" data-label={t("open")}>
                         {eur(row.open_cents)}
                       </td>
                     </tr>
@@ -256,23 +267,31 @@ export function Invoices({ version }: { version: number }) {
                 })}
               </tbody>
             </table>
-          </div>
-          <nav className="pager" aria-label={t("pagination")}>
+          )}
+        </Rereading>
+
+        {data.items.length > 0 && (
+          <nav className="list-foot" aria-label={t("pagination")}>
             <span className="muted small" role="status">
               {t("pageOf", { from, to, total: data.total })}
             </span>
-            <div className="button-row tight">
-              <button disabled={data.page <= 1} onClick={() => change({ page: data.page - 1 })}>
-                {t("previous")}
-              </button>
-              <button disabled={to >= data.total} onClick={() => change({ page: data.page + 1 })}>
-                {t("next")}
-              </button>
-            </div>
+            {pages > 1 && (
+              <div className="button-row">
+                <Button size="sm" icon="chevron-left" disabled={data.page <= 1} onClick={() => change({ page: data.page - 1 })}>
+                  {t("previous")}
+                </Button>
+                <Button size="sm" iconEnd="chevron-right" disabled={to >= data.total} onClick={() => change({ page: data.page + 1 })}>
+                  {t("next")}
+                </Button>
+              </div>
+            )}
           </nav>
-        </>
-      )}
-      </Rereading>
-    </>
+        )}
+      </section>
+      <p className="status-line hide-phone">
+        <Icon name="keyboard" size="sm" />
+        {t("searchShortcutHint")}
+      </p>
+    </Page>
   );
 }
