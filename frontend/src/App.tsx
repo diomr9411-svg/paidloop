@@ -92,7 +92,7 @@ function OwnerApp({ hash }: { hash: string }) {
     page = <Settings refresh={refresh} />;
     titleKey = "navSettings";
   } else {
-    page = <Dashboard version={version} refresh={refresh} />;
+    page = <Dashboard version={version} refresh={refresh} simulated={health?.paypal_mode === "simulated"} />;
   }
 
   useEffect(() => {
@@ -191,12 +191,14 @@ function StatusLights({ health }: { health: any }) {
 
   return (
     <div className="chips" lang={lang}>
-      <span className={`chip ${sandbox ? state : ""}`} title={detail}>
+      <a className={`chip ${sandbox ? state : ""}`} title={detail} href="#/settings/connections">
         {sandbox && <span aria-hidden="true">{mark} </span>}
         {sandbox ? t("paypalSandbox") : t("paypalSimulated")}
         {detail && <span className="chip-detail"> · {detail}</span>}
-      </span>
-      <span className="chip">{health.ai.available ? t("aiOn", { model: health.ai.model }) : t("aiOff")}</span>
+      </a>
+      <a className="chip" href="#/settings/connections">
+        {health.ai.available ? t("aiOn", { model: health.ai.model }) : t("aiOff")}
+      </a>
     </div>
   );
 }

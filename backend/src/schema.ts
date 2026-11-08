@@ -21,6 +21,8 @@ export interface Table {
   key?: string;
   indexes: Record<string, string[]>;
   uniques?: string[][];
+  /** Kept when the demo is reset, so the owner keeps their own keys. */
+  keep?: boolean;
 }
 
 const int = (def: number = 0): Column => ({ type: "int", default: def });
@@ -199,6 +201,20 @@ export const TABLES: Record<string, Table> = {
     columns: { key: { type: "text" }, value: text() },
     key: "key",
     indexes: {},
+  },
+  // The owner's own PayPal and AI settings, made in the app (Settings > Connections). One row.
+  // A group marked "saved" replaces the .env values for that group. The PayPal secret is stored sealed.
+  connection: {
+    columns: {
+      id: { type: "int" },
+      paypal_saved: bool(), paypal_client_id: text(), paypal_secret: text(), paypal_secret_hint: text(),
+      paypal_webhook_id: text(), sandbox_buyer_email: text(),
+      ai_saved: bool(), ai_enabled: bool(true), ollama_base_url: text(), ollama_model: text(), ai_cpu_only: bool(),
+      updated_at: { type: "datetime", nullable: true, default: null },
+    },
+    key: "id",
+    indexes: {},
+    keep: true,
   },
 };
 

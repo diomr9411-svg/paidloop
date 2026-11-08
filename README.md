@@ -94,17 +94,19 @@ Open http://localhost:8000 and click **Reset demo**.
 
 **Without any keys**, the app runs with a clearly marked PayPal simulator, and fixed rules replace the AI.
 
-**For the real PayPal sandbox** (free), create an app at [developer.paypal.com](https://developer.paypal.com) and put the sandbox keys in `.env`, plus your sandbox personal account email as `SANDBOX_BUYER_EMAIL`. Log in with that account on the pay link to pay with test money.
+**For the real PayPal sandbox** (free), create an app at [developer.paypal.com](https://developer.paypal.com). Then open **Settings > Connections** in PaidLoop, paste the sandbox client ID and secret, and click **Save and connect**. The app tests the keys with PayPal and says if they work. Add your sandbox personal account email as the test customer, and log in with that account on the pay link to pay with test money. Each business sets its own keys there; nobody has to edit a file. (Developers can still use `.env`; keys saved in the app win.)
 
-**For the local AI** (free), install [Ollama](https://ollama.com) and run `ollama pull qwen2.5:3b`. On a laptop without a strong graphics card, an answer can take a minute or more.
+**Where the keys are kept.** Only on your computer, in the `data` folder. The secret is stored encrypted (AES-256-GCM) and is never shown again, not even to the screens. The encryption key is a file in the same folder, so keep that folder private. Only this computer can use the owner screens: PaidLoop refuses other host names and changes sent from other websites. The keys screen accepts sandbox keys only.
 
-**Webhooks are optional.** The app asks PayPal for updates every 20 seconds, so it works without a public address. To use webhooks, register `/api/paypal/webhook` at a public URL and set `PAYPAL_WEBHOOK_ID`.
+**For the local AI** (free), install [Ollama](https://ollama.com) and run `ollama pull qwen2.5:3b`. In **Settings > Connections**, click **Find models**, pick the model and save. On a laptop without a strong graphics card, an answer can take a minute or more.
+
+**Webhooks are optional.** The app asks PayPal for updates every 20 seconds, so it works without a public address. To use webhooks, register `/api/paypal/webhook` at a public URL and put the webhook ID in **Settings > Connections**.
 
 ## Tests
 
 ```bash
 cd backend
-npm test          # 313 tests
+npm test          # 327 tests
 npm run check     # type check
 ```
 

@@ -64,7 +64,7 @@ function Queue({ view, refresh }: { view: any; refresh: () => void }) {
   );
 }
 
-export function Dashboard({ version, refresh }: { version: number; refresh: () => void }) {
+export function Dashboard({ version, refresh, simulated }: { version: number; refresh: () => void; simulated?: boolean }) {
   const { t, eur, day, invoiceCount } = useT();
   const [view, setView] = useState<any>(null);
   const [error, setError] = useState("");
@@ -104,6 +104,17 @@ export function Dashboard({ version, refresh }: { version: number; refresh: () =
         }
       />
       {error && <ErrorBox text={error} />}
+      {simulated && (
+        <div className="card callout attention connect-callout">
+          <div>
+            <strong>{t("connectPaypal")}</strong>
+            <p className="small">{t("connectPaypalHint")}</p>
+          </div>
+          <a className="button" href="#/settings/connections">
+            {t("connectPaypal")}
+          </a>
+        </div>
+      )}
       {empty && (
         <div className="card callout">
           <strong>{t("emptyStart")}</strong> <a href="#/new">{t("emptyStartLink")}</a> {t("emptyStartRest")}

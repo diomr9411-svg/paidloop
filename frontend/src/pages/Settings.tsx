@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError, put } from "../api";
 import { BusyLabel, ErrorBox, Field, Loading, PageHeader, useToast } from "../components";
 import { Key, useT } from "../i18n";
+import { Connections } from "./Connections";
 
 export function Settings({ refresh }: { refresh: () => void }) {
   const { t } = useT();
@@ -62,13 +63,15 @@ export function Settings({ refresh }: { refresh: () => void }) {
   }
 
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        save();
-      }}
-    >
-      <PageHeader title={t("settings")} info={t("agentLimitsHint")} />
+    <>
+      <PageHeader title={t("settings")} info={t("connectionsHint")} />
+      <form
+        className="stack"
+        onSubmit={(event) => {
+          event.preventDefault();
+          save();
+        }}
+      >
       <section className="card">
         <h2>{t("yourBusiness")}</h2>
         <div className="form-grid">
@@ -112,6 +115,8 @@ export function Settings({ refresh }: { refresh: () => void }) {
           <BusyLabel busy={busy} label={t("saveSettings")} pending={t("saving")} />
         </button>
       </div>
-    </form>
+      </form>
+      <Connections refresh={refresh} />
+    </>
   );
 }

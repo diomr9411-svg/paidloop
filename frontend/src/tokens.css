@@ -29,14 +29,15 @@
   --success-700: #137442;
   --warning-100: #fff1d6;
   --warning-500: #e39a12;
-  --warning-700: #9c6200;
+  --warning-700: #975f00; /* one step darker than the rules file, so warning text passes 4.5:1 on the new page shade */
   --error-100: #fde2e2;
   --error-500: #dd3636;
   --error-700: #a82424;
 
   /* Roles, light. A screen names a role, never a shade. */
   color-scheme: light;
-  --canvas: var(--neutral-50);
+  /* The page is a shade darker than the cards, so white cards stand out from it. */
+  --canvas: var(--neutral-100);
   --surface: var(--white);
   --raised: var(--white);
   --sunken: var(--neutral-100);
@@ -100,16 +101,17 @@
   --weight-semibold: 600;
   --weight-bold: 700;
 
-  /* Spacing: one 4px rhythm, named steps. Comfortable values on a phone. */
+  /* Spacing: one 4px rhythm, named steps. PaidLoop is for small business owners, not a dense ERP,
+     so the comfortable steps are roomy (rules file, section 24). Compact density keeps the tight values. */
   --space-hair: 2px;
   --space-tight: 4px;
   --space-item: 8px;
-  --space-group: 12px;
-  --space-section: 16px;
-  --space-page: 24px;
-  --space-card: 12px;
-  --space-dialog: 16px;
-  --space-gutter: 8px;
+  --space-group: 16px;
+  --space-section: 24px;
+  --space-page: 32px;
+  --space-card: 20px;
+  --space-dialog: 20px;
+  --space-gutter: 16px;
   --space-indent: 12px;
   --size-control: 40px;
   --size-target: 44px;
@@ -117,7 +119,7 @@
   --size-toolbar: 28px;
   --size-topbar: 64px;
   --size-icon: 16px;
-  --measure-page: 1120px;
+  --measure-page: 1200px;
   --measure-narrow: 560px;
 
   /* Shape and depth */
@@ -155,15 +157,17 @@
 /* From 640px (sm) */
 @media (min-width: 640px) {
   :root {
-    --space-gutter: 12px;
+    --space-gutter: 24px;
   }
 }
 
 /* From 1024px (lg): controls get smaller, because a mouse is more precise than a finger */
 @media (min-width: 1024px) {
   :root {
-    --size-control: 34px;
-    --size-row: 40px;
+    --size-control: 36px;
+    --size-row: 44px;
+    --space-gutter: 32px;
+    --space-card: 24px;
   }
 }
 

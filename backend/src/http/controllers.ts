@@ -23,6 +23,7 @@ import { languageOf, NOT_FOUND, ValidationFailed } from "./errors";
 import {
   ApproveIn, AuditQuery, BusinessIn, CancelIn, ChatIn, CustomerIn, CustomerQuery, DraftIn, idParam, InvoiceQuery, IssueIn, JumpIn, parse, PaymentIn, TextIn,
 } from "./schemas";
+import { ConnectionsController } from "./connections.controller";
 import { Services } from "./services";
 import {
   businessJson, captureJson, checkJson, customerJson, findCustomer, invoiceDetail, planJson, proposalsJson, summaries,
@@ -561,4 +562,4 @@ export class PayController {
 }
 
 
-export const CONTROLLERS = [CoreController, InvoicesController, PayController];
+export const CONTROLLERS = [CoreController, InvoicesController, PayController, ConnectionsController];

@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   server:
-    name: Server (types and 313 tests)
+    name: Server (types and tests)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

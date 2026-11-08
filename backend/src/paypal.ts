@@ -132,6 +132,11 @@ export class PayPalClient implements PayPalApi {
     return this.tokenRequest;
   }
 
+  /** Asks PayPal for a token and nothing else, so the owner can test new keys safely. */
+  async checkKeys(): Promise<void> {
+    await this.fetchToken();
+  }
+
   private async fetchToken(): Promise<string> {
     let response: Response;
     try {

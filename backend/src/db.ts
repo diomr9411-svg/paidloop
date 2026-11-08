@@ -78,7 +78,7 @@ export class Db {
   /** Remove every table and make them again, empty. Used by the demo reset. */
   dropAll(): void {
     this.raw.pragma("foreign_keys = OFF");
-    for (const table of Object.keys(TABLES)) this.raw.exec(`DROP TABLE IF EXISTS "${table}"`);
+    for (const [table, spec] of Object.entries(TABLES)) if (!spec.keep) this.raw.exec(`DROP TABLE IF EXISTS "${table}"`);
     this.raw.pragma("foreign_keys = ON");
     this.statements.clear();
     this.prepare();

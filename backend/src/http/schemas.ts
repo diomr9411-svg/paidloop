@@ -82,3 +82,37 @@ export function idParam(value: string, name: string): number {
   if (!/^-?\d+$/.test(value)) throw new ValidationFailed([name]);
   return Number(value);
 }
+
+// ---- connections (the owner's own keys)
+
+const key = (max: number) => z.string().trim().max(max).regex(/^[A-Za-z0-9_-]*$/);
+const email = z.string().trim().max(200).refine((value) => value === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value), "not an email").default("");
+const localUrl = z.string().trim().max(200).refine((value) => {
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}, "not a web address");
+
+export const PaypalIn = z.object({
+  client_id: key(200).min(10),
+  client_secret: key(300).default(""), // empty keeps the secret in use
+  webhook_id: key(100).default(""),
+  buyer_email: email,
+});
+
+export const PaypalTestIn = z.object({
+  client_id: key(200).default(""),
+  client_secret: key(300).default(""),
+});
+
+export const AiIn = z.object({
+  enabled: z.boolean(),
+  base_url: localUrl.default("http://localhost:11434"),
+  model: z.string().trim().max(100).regex(/^[A-Za-z0-9_.:/-]*$/).default(""),
+  cpu_only: z.boolean().default(false),
+}).refine((value) => !value.enabled || value.model !== "", { path: ["model"], message: "a model is needed" });
+
+export const AiTestIn = z.object({ base_url: localUrl.default("http://localhost:11434") });
