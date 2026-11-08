@@ -39,7 +39,7 @@ So many late payers only need a good reminder at the right time, while others re
 
 - **English and German everywhere.** Owner screens, error messages, legal checks, reasons and the audit trail follow the language switch. Invoices, PDFs, reminders and the customer page use the customer's language. Money and dates use the right local format.
 - **Designed with usability and industrial engineering methods:** a "Next steps" work queue, one approval at a time, a four-step invoice flow, error-proofing, a PayPal status light, and measured time to get paid. See [docs/USABILITY.md](docs/USABILITY.md), which also says what was not tested yet.
-- **Built to a written UI rulebook:** design tokens, dark theme, compact view, loading skeletons, card lists on phones, and automatic checks at 5 screen widths. See [docs/UI-RULES-APPLIED.md](docs/UI-RULES-APPLIED.md).
+- **Built to a written UI rulebook:** one set of shared parts, design tokens, the Inter font served by the app, Lucide icons, dark theme, compact view, loading skeletons, card lists on phones, and a design catalogue at `#/design`. Machine checks cover contrast, spacing, accessibility lint, size limits, and every screen at 5 widths. See [docs/UI-RULES-APPLIED.md](docs/UI-RULES-APPLIED.md).
 - **Stored data uses indexes.** Lists come one page at a time, screens don't run one query per row, and PDFs load only when asked for. Tests check the query plans, and `npm run benchmark` in `backend` measures 20,000 invoices.
 
 ## Why the AI can't break anything
@@ -108,7 +108,14 @@ Open http://localhost:8000 and click **Reset demo**.
 cd backend
 npm test          # 327 tests
 npm run check     # type check
+
+cd frontend
+npm run build     # UI rules (contrast, spacing, colours, motion), accessibility lint, types, size limits
+npm run walk      # every screen in Chrome at 5 widths, dark, German, compact, reduced motion: 169 checks with axe
+npm run flows     # the main jobs end to end, 24 checks (changes data: use fresh demo data)
 ```
+
+`walk` and `flows` need the app running (`UI_URL`, default http://127.0.0.1:8000) and Chrome.
 
 With the app running against the real sandbox:
 
@@ -122,7 +129,7 @@ npm run e2e
 - **PayPal:** Invoicing API v2 and webhook verification, in the sandbox.
 - **AI in the product:** Ollama with the free Qwen 2.5 3B model, running locally.
 - **E-invoice:** @stackforge-eu/factur-x, Saxon-JS, and the official EN 16931 rules from the EU project.
-- **Others:** NestJS, better-sqlite3, zod, React, Vite, pdf-lib, pdf.js, Tesseract.js (free offline text reading).
+- **Others:** NestJS, better-sqlite3, zod, React, Vite, pdf-lib, pdf.js, Tesseract.js (free offline text reading), the Inter font, Lucide icons, ESLint with jsx-a11y, axe-core.
 - **AI help while building:** the code was written with Claude Code, under the author's direction and with the author's review.
 
 See `THIRD_PARTY_NOTICES.md` for licenses.
