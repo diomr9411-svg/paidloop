@@ -157,9 +157,9 @@
   --icon-md: 16px;
   --icon-lg: 20px;
   --icon-stroke: 2;
-  --measure-page: 1200px;
-  --measure-form: 960px;
-  --measure-narrow: 560px;
+  /* Pages use the whole window (owner, 9 Nov 2026); this only stops very large monitors from stretching a page too far */
+  --measure-page: 1920px;
+  --measure-narrow: 560px; /* a comfortable line length for short text, not a page width */
   --measure-popover: 360px;
   --measure-dialog: 480px;
   --measure-menu: 260px;

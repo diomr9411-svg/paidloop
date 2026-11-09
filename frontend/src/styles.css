@@ -131,8 +131,22 @@ main:focus { outline: none; }
 
 /* ---------------------------------------------------------------- page and its header */
 .page { width: 100%; display: flex; flex-direction: column; gap: var(--space-section); }
-.page-wizard, .page-detail, .page-settings { max-width: var(--measure-form); margin: 0 auto; }
-.page-customer { max-width: var(--measure-narrow); margin: 0 auto; gap: var(--space-group); }
+.page-customer { gap: var(--space-group); }
+/* Wide screens: a main column and a side column, so the whole window is used and nothing just stretches */
+.split { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-section); align-items: start; }
+.split-main, .split-side { display: flex; flex-direction: column; gap: var(--space-section); min-width: 0; }
+/* Cards side by side; in one row they share a height, and each card's own Save sits at its foot */
+.card-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-section); align-items: stretch; }
+.card-grid > form, .card-grid > .loading { display: flex; flex-direction: column; min-width: 0; }
+.card-grid > form > .card { flex: 1; }
+.card-grid .card-foot { margin-top: auto; }
+@media (min-width: 1024px) {
+  .split.even { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1280px) {
+  .split { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+  .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .page-header { display: flex; flex-direction: column; gap: var(--space-tight); }
 .page-back {
   display: inline-flex; align-items: center; gap: var(--space-tight); width: fit-content; text-decoration: none;
@@ -251,6 +265,7 @@ input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="
 .field-error { color: var(--bad-text); }
 .field.unsure input, .field.unsure select { background: var(--warn-bg); border-color: var(--warn-mark); }
 .field-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-group) var(--space-section); align-items: start; }
+.field-grid > .full { grid-column: 1 / -1; }
 .field-pair { display: grid; grid-template-columns: var(--col-price) minmax(0, 1fr); gap: var(--space-item); }
 .field-with-chips { display: flex; flex-direction: column; gap: var(--space-item); }
 .date-chips { display: flex; flex-wrap: wrap; gap: var(--space-tight); }
@@ -691,7 +706,7 @@ table.clickable tbody tr:hover { background: var(--hover-bg); }
 .btn.suggestion { white-space: normal; text-align: left; }
 
 /* ---------------------------------------------------------------- the customer page */
-.paypage { width: 100%; max-width: var(--measure-narrow); margin: 0 auto; padding: var(--space-section) var(--space-gutter) var(--space-page); display: flex; flex-direction: column; gap: var(--space-group); }
+.paypage { width: 100%; max-width: var(--measure-page); margin: 0 auto; padding: var(--space-section) var(--space-gutter) var(--space-page); display: flex; flex-direction: column; gap: var(--space-group); }
 .pay-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-group); }
 .pay-seller { display: flex; align-items: center; gap: var(--space-indent); min-width: 0; }
 .pay-seller > div { display: flex; flex-direction: column; gap: var(--space-hair); min-width: 0; }

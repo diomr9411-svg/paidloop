@@ -9,6 +9,7 @@ import { Card, SectionCard } from "../ui/Card";
 import { EmptyState } from "../ui/EmptyState";
 import { Field } from "../ui/Field";
 import { Icon, IconName, IconTile } from "../ui/Icon";
+import { Split } from "../ui/Layout";
 import { Loading } from "../ui/Loading";
 import { Page, PageHeader } from "../ui/PageHeader";
 import { useToast } from "../ui/Toast";
@@ -164,45 +165,53 @@ export function Approvals({ version, refresh }: PageProps) {
   return (
     <Page template="list">
       <PageHeader title={t("approvals")} info={t("approvalsIntro")} />
-      {rows.length === 0 && (
-        <Card>
-          <EmptyState icon="inbox" tone="good" title={t("nothingWaiting")} hint={t("nothingWaitingHint")} action={<RunAgentButton refresh={refresh} />} />
-        </Card>
-      )}
-      {current && (
-        <ApprovalCard
-          key={current.id}
-          item={current}
-          position={currentIndex + 1}
-          total={rows.length}
-          done={(message) => {
-            toast(message);
-            setCurrentId(rows[currentIndex + 1]?.id ?? null);
-            refresh();
-          }}
-          later={rows.length > 1 ? () => setCurrentId(rows[(currentIndex + 1) % rows.length].id) : undefined}
-        />
-      )}
-      {others.length > 0 && (
-        <SectionCard title={t("alsoWaiting")} icon="inbox">
-          <ul className="rows">
-            {others.map((row) => (
-              <li className="row-item" key={row.id}>
-                <IconTile name={ICONS[row.action] || "inbox"} tone="neutral" size="sm" />
-                <div className="row-text">
-                  <strong className="row-title">{labels.action[row.action] || row.action}</strong>
-                  <span className="row-meta">
-                    {row.invoice.customer?.name} · {eur(row.invoice.open_cents)}
-                  </span>
-                </div>
-                <Button size="sm" tone="ghost" iconEnd="arrow-right" onClick={() => setCurrentId(row.id)}>
-                  {t("bringForward")}
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </SectionCard>
-      )}
+      <Split
+        main={
+          <>
+            {rows.length === 0 && (
+              <Card>
+                <EmptyState icon="inbox" tone="good" title={t("nothingWaiting")} hint={t("nothingWaitingHint")} action={<RunAgentButton refresh={refresh} />} />
+              </Card>
+            )}
+            {current && (
+              <ApprovalCard
+                key={current.id}
+                item={current}
+                position={currentIndex + 1}
+                total={rows.length}
+                done={(message) => {
+                  toast(message);
+                  setCurrentId(rows[currentIndex + 1]?.id ?? null);
+                  refresh();
+                }}
+                later={rows.length > 1 ? () => setCurrentId(rows[(currentIndex + 1) % rows.length].id) : undefined}
+              />
+            )}
+          </>
+        }
+        side={
+          others.length > 0 && (
+            <SectionCard title={t("alsoWaiting")} icon="inbox">
+              <ul className="rows">
+                {others.map((row) => (
+                  <li className="row-item" key={row.id}>
+                    <IconTile name={ICONS[row.action] || "inbox"} tone="neutral" size="sm" />
+                    <div className="row-text">
+                      <strong className="row-title">{labels.action[row.action] || row.action}</strong>
+                      <span className="row-meta">
+                        {row.invoice.customer?.name} · {eur(row.invoice.open_cents)}
+                      </span>
+                    </div>
+                    <Button size="sm" tone="ghost" iconEnd="arrow-right" onClick={() => setCurrentId(row.id)}>
+                      {t("bringForward")}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </SectionCard>
+          )
+        }
+      />
     </Page>
   );
 }

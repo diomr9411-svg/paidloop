@@ -10,6 +10,7 @@ import { cx } from "../ui/cx";
 import { EmptyState } from "../ui/EmptyState";
 import { Field, FieldGrid, Switch } from "../ui/Field";
 import { Icon, IconName, IconTile, InitialsTile } from "../ui/Icon";
+import { Split } from "../ui/Layout";
 import { Page, PageHeader } from "../ui/PageHeader";
 import { Stepper } from "../ui/Stepper";
 import { useCopyLink } from "../widgets/copyLink";
@@ -586,7 +587,7 @@ export function NewInvoice({ hash, refresh }: PageProps) {
                   </div>
                 </div>
               ) : (
-                <FieldGrid>
+                <FieldGrid columns={3}>
                   <Field id="buyer.name" label={t("customerName")} help={customer.id ? undefined : t("customerNameHint")} unsure={flag("customer_name")} error={fieldErrors["buyer.name"]} emphasis>
                     <input
                       list="known-customers"
@@ -791,87 +792,92 @@ export function NewInvoice({ hash, refresh }: PageProps) {
 
       {step === "check" && check && (
         <>
-          <section className="card" aria-labelledby="check-title">
-            <div className="card-head">
-              <h2 id="check-title" ref={heading} tabIndex={-1}>
-                {t("checkTitle")}
-              </h2>
-              {toFix > 0 ? (
-                <Badge tone="bad" icon="circle-x">
-                  {t("toFixCount", { n: toFix })}
-                </Badge>
-              ) : (
-                <Badge tone="good" icon="circle-check">
-                  {t("readyToIssue")}
-                </Badge>
-              )}
-            </div>
-            {check.issues.length === 0 && <Alert tone="good">{t("noProblems")}</Alert>}
-            {check.issues.length > 0 && (
-              <ul className="issues">
-                {check.issues.map((issue: any) => {
-                  const seller = issue.field.startsWith("seller");
-                  const target = targetOf(issue.field);
-                  const kind = SEVERITY[issue.severity] || SEVERITY.info;
-                  return (
-                    <li key={`${issue.rule_id}-${issue.field}`} className={cx("issue", issue.severity)}>
-                      <span className="issue-icon">
-                        <Icon name={kind.icon} />
-                      </span>
-                      <div className="issue-body">
-                        <span className="issue-tag">{t(kind.tag)}</span>
-                        <strong>{issue.message}</strong>
-                        <span className="small">{issue.fix}</span>
-                        <span className="muted small">{issue.law}</span>
-                      </div>
-                      {issue.severity === "error" &&
-                        (seller ? (
-                          <ButtonLink size="sm" icon="settings" href="#/settings">
-                            {t("openSettings")}
-                          </ButtonLink>
-                        ) : target ? (
-                          <Button size="sm" icon="pencil" onClick={() => goToField(issue.field)}>
-                            {t("goToField")}
-                          </Button>
-                        ) : null)}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            {check.notes_to_print.length > 0 && (
-              <div className="printed-notes">
-                <strong>{t("printedNotes")}</strong>
-                <ul className="plain">
-                  {check.notes_to_print.map((text: string) => (
-                    <li key={text}>{text}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </section>
-
-          {check.can_issue && (
-            <SectionCard title={t("summary")} icon="receipt-text">
-              <dl className="facts">
-                <dt>{t("customer")}</dt>
-                <dd>{customer.name}</dd>
-                <dt>{t("sentTo")}</dt>
-                <dd>{customer.email || "-"}</dd>
-                <dt>{t("invoiceLanguage")}</dt>
-                <dd>{customer.language === "en" ? t("langEnglish") : t("langGerman")}</dd>
-                <dt>{t("paymentDue")}</dt>
-                <dd>{day(dates.due)}</dd>
-                <dt>{t("net")}</dt>
-                <dd className="tabular">{eur(sums.net)}</dd>
-                <dt>{t("vat")}</dt>
-                <dd className="tabular">{eur(sums.vat)}</dd>
-                <dt className="strong">{t("total")}</dt>
-                <dd className="tabular strong">{eur(sums.gross)}</dd>
-              </dl>
-              <p className="muted small">{t("issueHint")}</p>
-            </SectionCard>
-          )}
+          <Split
+            main={
+              <section className="card" aria-labelledby="check-title">
+                <div className="card-head">
+                  <h2 id="check-title" ref={heading} tabIndex={-1}>
+                    {t("checkTitle")}
+                  </h2>
+                  {toFix > 0 ? (
+                    <Badge tone="bad" icon="circle-x">
+                      {t("toFixCount", { n: toFix })}
+                    </Badge>
+                  ) : (
+                    <Badge tone="good" icon="circle-check">
+                      {t("readyToIssue")}
+                    </Badge>
+                  )}
+                </div>
+                {check.issues.length === 0 && <Alert tone="good">{t("noProblems")}</Alert>}
+                {check.issues.length > 0 && (
+                  <ul className="issues">
+                    {check.issues.map((issue: any) => {
+                      const seller = issue.field.startsWith("seller");
+                      const target = targetOf(issue.field);
+                      const kind = SEVERITY[issue.severity] || SEVERITY.info;
+                      return (
+                        <li key={`${issue.rule_id}-${issue.field}`} className={cx("issue", issue.severity)}>
+                          <span className="issue-icon">
+                            <Icon name={kind.icon} />
+                          </span>
+                          <div className="issue-body">
+                            <span className="issue-tag">{t(kind.tag)}</span>
+                            <strong>{issue.message}</strong>
+                            <span className="small">{issue.fix}</span>
+                            <span className="muted small">{issue.law}</span>
+                          </div>
+                          {issue.severity === "error" &&
+                            (seller ? (
+                              <ButtonLink size="sm" icon="settings" href="#/settings">
+                                {t("openSettings")}
+                              </ButtonLink>
+                            ) : target ? (
+                              <Button size="sm" icon="pencil" onClick={() => goToField(issue.field)}>
+                                {t("goToField")}
+                              </Button>
+                            ) : null)}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {check.notes_to_print.length > 0 && (
+                  <div className="printed-notes">
+                    <strong>{t("printedNotes")}</strong>
+                    <ul className="plain">
+                      {check.notes_to_print.map((text: string) => (
+                        <li key={text}>{text}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </section>
+            }
+            side={
+              check.can_issue && (
+                <SectionCard title={t("summary")} icon="receipt-text">
+                  <dl className="facts">
+                    <dt>{t("customer")}</dt>
+                    <dd>{customer.name}</dd>
+                    <dt>{t("sentTo")}</dt>
+                    <dd>{customer.email || "-"}</dd>
+                    <dt>{t("invoiceLanguage")}</dt>
+                    <dd>{customer.language === "en" ? t("langEnglish") : t("langGerman")}</dd>
+                    <dt>{t("paymentDue")}</dt>
+                    <dd>{day(dates.due)}</dd>
+                    <dt>{t("net")}</dt>
+                    <dd className="tabular">{eur(sums.net)}</dd>
+                    <dt>{t("vat")}</dt>
+                    <dd className="tabular">{eur(sums.vat)}</dd>
+                    <dt className="strong">{t("total")}</dt>
+                    <dd className="tabular strong">{eur(sums.gross)}</dd>
+                  </dl>
+                  <p className="muted small">{t("issueHint")}</p>
+                </SectionCard>
+              )
+            }
+          />
 
           <div className="action-bar">
             <Button tone="ghost" icon="arrow-left" onClick={() => setStep("details")}>

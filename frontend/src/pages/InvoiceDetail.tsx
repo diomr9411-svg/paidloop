@@ -10,6 +10,7 @@ import { ConfirmButton } from "../ui/Dialog";
 import { EmptyState } from "../ui/EmptyState";
 import { Field } from "../ui/Field";
 import type { IconName, Tone } from "../ui/Icon";
+import { Split } from "../ui/Layout";
 import { Loading } from "../ui/Loading";
 import { Page, PageHeader } from "../ui/PageHeader";
 import { useToast } from "../ui/Toast";
@@ -156,301 +157,310 @@ export function InvoiceDetail({ param, version, refresh, health }: PageProps) {
         {invoice.has_pending ? t("nowWaiting") : null}
       </Alert>
 
-      <article className="paper" aria-label={t("invoiceFace")}>
-        <header className="paper-head">
-          <div className="paper-block">
-            <strong className="paper-seller">{business?.name || " "}</strong>
-            {business && (
-              <span className="muted">
-                {[business.street, [business.postcode, business.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")}
-              </span>
-            )}
-            {business?.vat_id && <span className="muted small">{t("vatIdShort", { id: business.vat_id })}</span>}
-          </div>
-          <div className="paper-title">
-            <span className="eyebrow">{t("invoiceWord")}</span>
-            <strong className="paper-number">{title}</strong>
-          </div>
-        </header>
-
-        <div className="paper-parties">
-          <div className="paper-block">
-            <span className="eyebrow">{t("billTo")}</span>
-            <strong>{customer?.name || t("draftUnnamed")}</strong>
-            {customer && (
-              <>
-                {customer.street && <span>{customer.street}</span>}
-                {(customer.postcode || customer.city) && <span>{[customer.postcode, customer.city].filter(Boolean).join(" ")}</span>}
-                <span className="muted small">
-                  {customer.is_business ? t("businessCustomer") : t("privateCustomer")} · {customer.language === "en" ? t("langEnglish") : t("langGerman")}
-                </span>
-              </>
-            )}
-          </div>
-          <dl className="facts paper-dates">
-            <dt>{t("invoiceDate")}</dt>
-            <dd>{day(invoice.issue_date)}</dd>
-            <dt>{t("workDate")}</dt>
-            <dd>{day(invoice.service_date)}</dd>
-            <dt>{t("due")}</dt>
-            <dd>{day(invoice.due_date)}</dd>
-          </dl>
-        </div>
-
-        <table className="rtable paper-lines">
-          <thead>
-            <tr>
-              <th scope="col">{t("item")}</th>
-              <th scope="col" className="num">
-                {t("qty")}
-              </th>
-              <th scope="col" className="num">
-                {t("price")}
-              </th>
-              <th scope="col" className="num">
-                {t("net")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {invoice.lines.map((line: any, index: number) => (
-              <tr key={index}>
-                <td className="lead" data-label="">
-                  {line.description}
-                </td>
-                <td className="num" data-label={t("qty")}>
-                  {number(line.quantity)} {line.unit === "HUR" ? t("unitHours") : ""}
-                </td>
-                <td className="num" data-label={t("price")}>
-                  {eur(line.unit_price_cents)}
-                </td>
-                <td className="num" data-label={t("net")}>
-                  {eur(line.net_cents)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <dl className="paper-totals">
-          <dt>{t("net")}</dt>
-          <dd>{eur(invoice.net_cents)}</dd>
-          <dt>{t("vat")}</dt>
-          <dd>{eur(invoice.vat_cents)}</dd>
-          <dt className="grand">{t("total")}</dt>
-          <dd className="grand">{eur(invoice.gross_cents)}</dd>
-          {!isDraft && (
-            <>
-              <dt>{t("paid")}</dt>
-              <dd>{eur(-invoice.paid_cents)}</dd>
-              <dt className="grand">{t("stillOpen")}</dt>
-              <dd className="grand">{eur(invoice.open_cents)}</dd>
-            </>
-          )}
-        </dl>
-
-        {invoice.payments?.length > 0 && (
-          <div className="paper-payments">
-            <span className="eyebrow">{t("paymentsReceived")}</span>
-            <ul className="rows">
-              {invoice.payments.map((payment: any, index: number) => (
-                <li className="row-item compact" key={index}>
-                  <span className="muted nowrap">{day(payment.paid_on)}</span>
-                  <span>{methodName(payment.method, t)}</span>
-                  <strong className="num">{eur(payment.amount_cents)}</strong>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {!isDraft && <p className="paper-foot">{t("documentsHint")}</p>}
-      </article>
-
-      {!isDraft && (
-        <SectionCard title={t("documents")} icon="file-text">
-          <div className="button-row">
-            <ButtonLink icon="file-code" href={`/api/invoices/${id}/xml`}>
-              {t("xml")}
-            </ButtonLink>
-            {invoice.credit_note_number && (
-              <ButtonLink icon="file-text" href={`/api/invoices/${id}/credit-note`}>
-                {t("creditNote", { number: invoice.credit_note_number })}
-              </ButtonLink>
-            )}
-            {invoice.pay_link && !invoice.plan && invoice.status !== "cancelled" && (
-              <ButtonLink icon="credit-card" href={invoice.pay_link} external>
-                {t("paypalLink")}
-              </ButtonLink>
-            )}
-            {invoice.public_token && (
-              <ButtonLink icon="link" href={`#/pay/${invoice.public_token}`} external>
-                {t("customerPage")}
-              </ButtonLink>
-            )}
-          </div>
-          {invoice.source_text && (
-            <details className="source-note">
-              <summary>{t("sourceNote")}</summary>
-              <p className="pre small">{invoice.source_text}</p>
-            </details>
-          )}
-        </SectionCard>
-      )}
-
-      {invoice.plan && (
-        <SectionCard title={t("paymentPlan")} icon="calendar-clock" flush>
-          <table className="rtable">
-            <thead>
-              <tr>
-                <th scope="col">#</th>
-                <th scope="col">{t("due")}</th>
-                <th scope="col" className="num">
-                  {t("amount")}
-                </th>
-                <th scope="col">{t("status")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoice.plan.installments.map((item: any) => (
-                <tr key={item.seq}>
-                  <td className="lead" data-label="#">
-                    {item.seq}
-                  </td>
-                  <td className="nowrap" data-label={t("due")}>
-                    {day(item.due_date)}
-                  </td>
-                  <td className="num" data-label={t("amount")}>
-                    {eur(item.amount_cents)}
-                  </td>
-                  <td data-label={t("status")}>
-                    {item.is_paid ? (
-                      <Badge tone="good" icon="circle-check">
-                        {t("planPaid")}
-                      </Badge>
-                    ) : (
-                      <Badge icon="clock">{t("planOpen")}</Badge>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </SectionCard>
-      )}
-
-      {invoice.risk && open && (
-        <SectionCard
-          title={t("paymentRisk")}
-          icon="gauge"
-          iconTone={invoice.risk.level === "high" ? "warn" : "info"}
-          actions={
-            <Badge tone={invoice.risk.level === "high" ? "warn" : invoice.risk.level === "medium" ? "neutral" : "good"} icon={invoice.risk.level === "high" ? "triangle-exclamation-point" : invoice.risk.level === "low" ? "circle-check" : "info"}>
-              {invoice.risk.level === "high" ? t("riskHigh") : invoice.risk.level === "medium" ? t("riskMedium") : t("riskLow")}
-            </Badge>
-          }
-        >
-          <ul className="plain">
-            {invoice.risk.reasons.map((reason: string) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-          {invoice.late_costs?.in_default && (
-            <p className="small">
-              {t(invoice.late_costs.flat_fee_cents ? "inDefaultFee" : "inDefault", {
-                date: day(invoice.late_costs.default_since),
-                interest: eur(invoice.late_costs.interest_cents),
-                rate: lang === "de" ? String(invoice.late_costs.rate_percent).replace(".", ",") : invoice.late_costs.rate_percent,
-                fee: eur(invoice.late_costs.flat_fee_cents),
-              })}
-            </p>
-          )}
-        </SectionCard>
-      )}
-
-      {open && (
-        <SectionCard title={t("otherActions")} icon="banknote">
-          {invoice.status !== "on_plan" && (
-            <form
-              className="inline-form"
-              onSubmit={async (event) => {
-                event.preventDefault();
-                const amount = bank.trim() ? toNumber(bank, lang) : invoice.open_cents / 100;
-                if (!(amount > 0)) {
-                  setBankError(t("amountAboveZero"));
-                  return;
-                }
-                const done = await act(() => post(`/api/invoices/${id}/record-payment`, { amount_eur: amount }), t("paymentRecorded"));
-                if (done) setBank("");
-              }}
-            >
-              <Field id="bank-payment" label={t("bankPayment")} help={t("bankPaymentHelp")} error={bankError} className="amount-field">
-                <input
-                  value={bank}
-                  inputMode="decimal"
-                  placeholder={(invoice.open_cents / 100).toLocaleString(lang === "de" ? "de-DE" : "en-GB", { minimumFractionDigits: 2 })}
-                  onChange={(event) => {
-                    setBank(event.target.value);
-                    setBankError("");
-                  }}
-                />
-              </Field>
-              <Button type="submit" icon="landmark" busy={busy} pending={t("saving")}>
-                {t("recordPayment")}
-              </Button>
-            </form>
-          )}
-          {invoice.paid_cents === 0 && (
-            <div className="danger-zone">
-              <div>
-                <strong>{t("cancelInvoice")}</strong>
-                <p className="muted small">{t("cancelHint")}</p>
-              </div>
-              <ConfirmButton
-                icon="ban"
-                label={t("cancelInvoice")}
-                title={t("cancelTitle", { number: title })}
-                body={t("cancelHint")}
-                confirmLabel={t("cancelConfirm")}
-                disabled={busy}
-                onConfirm={() => act(() => post(`/api/invoices/${id}/cancel`, { reason: t("cancelReason") }), t("cancelled"))}
-              />
-            </div>
-          )}
-        </SectionCard>
-      )}
-
-      {invoice.messages.length > 0 && (
-        <SectionCard title={t("chatWithCustomer")} icon="message-square">
-          <div className="chat readonly">
-            {invoice.messages.map((message: any, index: number) => (
-              <div key={index} className={`bubble ${message.role}`}>
-                {message.text}
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      )}
-
-      <SectionCard title={t("whatHappened")} icon="list-checks">
-        {events === null ? null : events.length === 0 ? (
-          <EmptyState icon="list-checks" title={t("nothingYet")} />
-        ) : (
-          <ol className="timeline">
-            {events.map((event) => (
-              <li key={event.id}>
-                <ActorBadge actor={event.actor} />
-                <div className="timeline-text">
-                  <strong>{labels.audit[event.action] || event.action.replaceAll("_", " ")}</strong>
-                  <span className="muted small">{eventText(event.data, tools)}</span>
+      <Split
+        main={
+          <>
+            <article className="paper" aria-label={t("invoiceFace")}>
+              <header className="paper-head">
+                <div className="paper-block">
+                  <strong className="paper-seller">{business?.name || " "}</strong>
+                  {business && (
+                    <span className="muted">
+                      {[business.street, [business.postcode, business.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")}
+                    </span>
+                  )}
+                  {business?.vat_id && <span className="muted small">{t("vatIdShort", { id: business.vat_id })}</span>}
                 </div>
-                <time className="timeline-when" dateTime={event.at}>
-                  {dateTime(event.at)}
-                </time>
-              </li>
-            ))}
-          </ol>
-        )}
-      </SectionCard>
+                <div className="paper-title">
+                  <span className="eyebrow">{t("invoiceWord")}</span>
+                  <strong className="paper-number">{title}</strong>
+                </div>
+              </header>
+
+              <div className="paper-parties">
+                <div className="paper-block">
+                  <span className="eyebrow">{t("billTo")}</span>
+                  <strong>{customer?.name || t("draftUnnamed")}</strong>
+                  {customer && (
+                    <>
+                      {customer.street && <span>{customer.street}</span>}
+                      {(customer.postcode || customer.city) && <span>{[customer.postcode, customer.city].filter(Boolean).join(" ")}</span>}
+                      <span className="muted small">
+                        {customer.is_business ? t("businessCustomer") : t("privateCustomer")} · {customer.language === "en" ? t("langEnglish") : t("langGerman")}
+                      </span>
+                    </>
+                  )}
+                </div>
+                <dl className="facts paper-dates">
+                  <dt>{t("invoiceDate")}</dt>
+                  <dd>{day(invoice.issue_date)}</dd>
+                  <dt>{t("workDate")}</dt>
+                  <dd>{day(invoice.service_date)}</dd>
+                  <dt>{t("due")}</dt>
+                  <dd>{day(invoice.due_date)}</dd>
+                </dl>
+              </div>
+
+              <table className="rtable paper-lines">
+                <thead>
+                  <tr>
+                    <th scope="col">{t("item")}</th>
+                    <th scope="col" className="num">
+                      {t("qty")}
+                    </th>
+                    <th scope="col" className="num">
+                      {t("price")}
+                    </th>
+                    <th scope="col" className="num">
+                      {t("net")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoice.lines.map((line: any, index: number) => (
+                    <tr key={index}>
+                      <td className="lead" data-label="">
+                        {line.description}
+                      </td>
+                      <td className="num" data-label={t("qty")}>
+                        {number(line.quantity)} {line.unit === "HUR" ? t("unitHours") : ""}
+                      </td>
+                      <td className="num" data-label={t("price")}>
+                        {eur(line.unit_price_cents)}
+                      </td>
+                      <td className="num" data-label={t("net")}>
+                        {eur(line.net_cents)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <dl className="paper-totals">
+                <dt>{t("net")}</dt>
+                <dd>{eur(invoice.net_cents)}</dd>
+                <dt>{t("vat")}</dt>
+                <dd>{eur(invoice.vat_cents)}</dd>
+                <dt className="grand">{t("total")}</dt>
+                <dd className="grand">{eur(invoice.gross_cents)}</dd>
+                {!isDraft && (
+                  <>
+                    <dt>{t("paid")}</dt>
+                    <dd>{eur(-invoice.paid_cents)}</dd>
+                    <dt className="grand">{t("stillOpen")}</dt>
+                    <dd className="grand">{eur(invoice.open_cents)}</dd>
+                  </>
+                )}
+              </dl>
+
+              {invoice.payments?.length > 0 && (
+                <div className="paper-payments">
+                  <span className="eyebrow">{t("paymentsReceived")}</span>
+                  <ul className="rows">
+                    {invoice.payments.map((payment: any, index: number) => (
+                      <li className="row-item compact" key={index}>
+                        <span className="muted nowrap">{day(payment.paid_on)}</span>
+                        <span>{methodName(payment.method, t)}</span>
+                        <strong className="num">{eur(payment.amount_cents)}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {!isDraft && <p className="paper-foot">{t("documentsHint")}</p>}
+            </article>
+            {invoice.messages.length > 0 && (
+              <SectionCard title={t("chatWithCustomer")} icon="message-square">
+                <div className="chat readonly">
+                  {invoice.messages.map((message: any, index: number) => (
+                    <div key={index} className={`bubble ${message.role}`}>
+                      {message.text}
+                    </div>
+                  ))}
+                </div>
+              </SectionCard>
+            )}
+          </>
+        }
+        side={
+          <>
+
+            {!isDraft && (
+              <SectionCard title={t("documents")} icon="file-text">
+                <div className="button-row">
+                  <ButtonLink icon="file-code" href={`/api/invoices/${id}/xml`}>
+                    {t("xml")}
+                  </ButtonLink>
+                  {invoice.credit_note_number && (
+                    <ButtonLink icon="file-text" href={`/api/invoices/${id}/credit-note`}>
+                      {t("creditNote", { number: invoice.credit_note_number })}
+                    </ButtonLink>
+                  )}
+                  {invoice.pay_link && !invoice.plan && invoice.status !== "cancelled" && (
+                    <ButtonLink icon="credit-card" href={invoice.pay_link} external>
+                      {t("paypalLink")}
+                    </ButtonLink>
+                  )}
+                  {invoice.public_token && (
+                    <ButtonLink icon="link" href={`#/pay/${invoice.public_token}`} external>
+                      {t("customerPage")}
+                    </ButtonLink>
+                  )}
+                </div>
+                {invoice.source_text && (
+                  <details className="source-note">
+                    <summary>{t("sourceNote")}</summary>
+                    <p className="pre small">{invoice.source_text}</p>
+                  </details>
+                )}
+              </SectionCard>
+            )}
+
+            {invoice.plan && (
+              <SectionCard title={t("paymentPlan")} icon="calendar-clock" flush>
+                <table className="rtable">
+                  <thead>
+                    <tr>
+                      <th scope="col">#</th>
+                      <th scope="col">{t("due")}</th>
+                      <th scope="col" className="num">
+                        {t("amount")}
+                      </th>
+                      <th scope="col">{t("status")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoice.plan.installments.map((item: any) => (
+                      <tr key={item.seq}>
+                        <td className="lead" data-label="#">
+                          {item.seq}
+                        </td>
+                        <td className="nowrap" data-label={t("due")}>
+                          {day(item.due_date)}
+                        </td>
+                        <td className="num" data-label={t("amount")}>
+                          {eur(item.amount_cents)}
+                        </td>
+                        <td data-label={t("status")}>
+                          {item.is_paid ? (
+                            <Badge tone="good" icon="circle-check">
+                              {t("planPaid")}
+                            </Badge>
+                          ) : (
+                            <Badge icon="clock">{t("planOpen")}</Badge>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </SectionCard>
+            )}
+
+            {invoice.risk && open && (
+              <SectionCard
+                title={t("paymentRisk")}
+                icon="gauge"
+                iconTone={invoice.risk.level === "high" ? "warn" : "info"}
+                actions={
+                  <Badge tone={invoice.risk.level === "high" ? "warn" : invoice.risk.level === "medium" ? "neutral" : "good"} icon={invoice.risk.level === "high" ? "triangle-exclamation-point" : invoice.risk.level === "low" ? "circle-check" : "info"}>
+                    {invoice.risk.level === "high" ? t("riskHigh") : invoice.risk.level === "medium" ? t("riskMedium") : t("riskLow")}
+                  </Badge>
+                }
+              >
+                <ul className="plain">
+                  {invoice.risk.reasons.map((reason: string) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+                {invoice.late_costs?.in_default && (
+                  <p className="small">
+                    {t(invoice.late_costs.flat_fee_cents ? "inDefaultFee" : "inDefault", {
+                      date: day(invoice.late_costs.default_since),
+                      interest: eur(invoice.late_costs.interest_cents),
+                      rate: lang === "de" ? String(invoice.late_costs.rate_percent).replace(".", ",") : invoice.late_costs.rate_percent,
+                      fee: eur(invoice.late_costs.flat_fee_cents),
+                    })}
+                  </p>
+                )}
+              </SectionCard>
+            )}
+
+            {open && (
+              <SectionCard title={t("otherActions")} icon="banknote">
+                {invoice.status !== "on_plan" && (
+                  <form
+                    className="inline-form"
+                    onSubmit={async (event) => {
+                      event.preventDefault();
+                      const amount = bank.trim() ? toNumber(bank, lang) : invoice.open_cents / 100;
+                      if (!(amount > 0)) {
+                        setBankError(t("amountAboveZero"));
+                        return;
+                      }
+                      const done = await act(() => post(`/api/invoices/${id}/record-payment`, { amount_eur: amount }), t("paymentRecorded"));
+                      if (done) setBank("");
+                    }}
+                  >
+                    <Field id="bank-payment" label={t("bankPayment")} help={t("bankPaymentHelp")} error={bankError} className="amount-field">
+                      <input
+                        value={bank}
+                        inputMode="decimal"
+                        placeholder={(invoice.open_cents / 100).toLocaleString(lang === "de" ? "de-DE" : "en-GB", { minimumFractionDigits: 2 })}
+                        onChange={(event) => {
+                          setBank(event.target.value);
+                          setBankError("");
+                        }}
+                      />
+                    </Field>
+                    <Button type="submit" icon="landmark" busy={busy} pending={t("saving")}>
+                      {t("recordPayment")}
+                    </Button>
+                  </form>
+                )}
+                {invoice.paid_cents === 0 && (
+                  <div className="danger-zone">
+                    <div>
+                      <strong>{t("cancelInvoice")}</strong>
+                      <p className="muted small">{t("cancelHint")}</p>
+                    </div>
+                    <ConfirmButton
+                      icon="ban"
+                      label={t("cancelInvoice")}
+                      title={t("cancelTitle", { number: title })}
+                      body={t("cancelHint")}
+                      confirmLabel={t("cancelConfirm")}
+                      disabled={busy}
+                      onConfirm={() => act(() => post(`/api/invoices/${id}/cancel`, { reason: t("cancelReason") }), t("cancelled"))}
+                    />
+                  </div>
+                )}
+              </SectionCard>
+            )}
+
+            <SectionCard title={t("whatHappened")} icon="list-checks">
+              {events === null ? null : events.length === 0 ? (
+                <EmptyState icon="list-checks" title={t("nothingYet")} />
+              ) : (
+                <ol className="timeline">
+                  {events.map((event) => (
+                    <li key={event.id}>
+                      <ActorBadge actor={event.actor} />
+                      <div className="timeline-text">
+                        <strong>{labels.audit[event.action] || event.action.replaceAll("_", " ")}</strong>
+                        <span className="muted small">{eventText(event.data, tools)}</span>
+                      </div>
+                      <time className="timeline-when" dateTime={event.at}>
+                        {dateTime(event.at)}
+                      </time>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </SectionCard>
+          </>
+        }
+      />
     </Page>
   );
 }

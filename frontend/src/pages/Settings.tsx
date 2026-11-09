@@ -7,6 +7,7 @@ import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { SectionCard } from "../ui/Card";
 import { Field, FieldGrid, Switch } from "../ui/Field";
+import { CardGrid } from "../ui/Layout";
 import { Loading } from "../ui/Loading";
 import { Page, PageHeader } from "../ui/PageHeader";
 import { useToast } from "../ui/Toast";
@@ -122,43 +123,45 @@ export function Settings({ refresh }: PageProps) {
   return (
     <Page template="settings">
       <PageHeader title={t("settings")} info={t("settingsIntro")} />
-      <form onSubmit={submit(business)}>
-        <SectionCard title={t("yourBusiness")} subtitle={t("yourBusinessHint")} icon="store" footer={<SaveFooter card={business} />}>
-          <FieldGrid>
-            {text("name", "name")}
-            {text("email", "emailPlain")}
-            {text("street", "street")}
-            <div className="field-pair">
-              {text("postcode", "postcode")}
-              {text("city", "city")}
-            </div>
-            {text("vat_id", "vatId")}
-            {text("tax_number", "taxNumber")}
-            <Field id="business-vat_method" label={t("vatMethod")}>
-              <select value={business.value("vat_method")} onChange={(event) => business.change("vat_method", event.target.value)}>
-                <option value="soll">{t("vatSoll")}</option>
-                <option value="ist">{t("vatIst")}</option>
-              </select>
-            </Field>
-            <Switch id="business-small_business" className="grid-switch" label={t("smallBusiness")} checked={!!business.value("small_business")} onChange={(event) => business.change("small_business", event.target.checked)} />
-          </FieldGrid>
-          {business.error && <ErrorBox text={business.error} />}
-        </SectionCard>
-      </form>
-      <form onSubmit={submit(limits)}>
-        <SectionCard title={t("agentLimits")} subtitle={t("agentLimitsHint")} icon="gauge" footer={<SaveFooter card={limits} />}>
-          <FieldGrid columns={3}>
-            {number("max_installments", "maxInstallments", "maxInstallmentsHint")}
-            {number("min_first_payment_pct", "minFirst", "minFirstHint")}
-            {number("max_plan_days", "maxPlanDays", "maxPlanDaysHint")}
-            {number("min_installment_eur", "minInstallment", "minInstallmentHint")}
-            {number("reminder_gap_days", "reminderGap", "reminderGapHint")}
-            {number("payment_days", "paymentDays", "paymentDaysHint")}
-          </FieldGrid>
-          {limits.error && <ErrorBox text={limits.error} />}
-        </SectionCard>
-      </form>
-      <Connections refresh={refresh} />
+      <CardGrid>
+        <form onSubmit={submit(business)}>
+          <SectionCard title={t("yourBusiness")} subtitle={t("yourBusinessHint")} icon="store" footer={<SaveFooter card={business} />}>
+            <FieldGrid>
+              {text("name", "name")}
+              {text("email", "emailPlain")}
+              {text("street", "street")}
+              <div className="field-pair">
+                {text("postcode", "postcode")}
+                {text("city", "city")}
+              </div>
+              {text("vat_id", "vatId")}
+              {text("tax_number", "taxNumber")}
+              <Field id="business-vat_method" label={t("vatMethod")} className="full">
+                <select value={business.value("vat_method")} onChange={(event) => business.change("vat_method", event.target.value)}>
+                  <option value="soll">{t("vatSoll")}</option>
+                  <option value="ist">{t("vatIst")}</option>
+                </select>
+              </Field>
+              <Switch id="business-small_business" className="grid-switch" label={t("smallBusiness")} checked={!!business.value("small_business")} onChange={(event) => business.change("small_business", event.target.checked)} />
+            </FieldGrid>
+            {business.error && <ErrorBox text={business.error} />}
+          </SectionCard>
+        </form>
+        <form onSubmit={submit(limits)}>
+          <SectionCard title={t("agentLimits")} subtitle={t("agentLimitsHint")} icon="gauge" footer={<SaveFooter card={limits} />}>
+            <FieldGrid columns={3}>
+              {number("max_installments", "maxInstallments", "maxInstallmentsHint")}
+              {number("min_first_payment_pct", "minFirst", "minFirstHint")}
+              {number("max_plan_days", "maxPlanDays", "maxPlanDaysHint")}
+              {number("min_installment_eur", "minInstallment", "minInstallmentHint")}
+              {number("reminder_gap_days", "reminderGap", "reminderGapHint")}
+              {number("payment_days", "paymentDays", "paymentDaysHint")}
+            </FieldGrid>
+            {limits.error && <ErrorBox text={limits.error} />}
+          </SectionCard>
+        </form>
+        <Connections refresh={refresh} />
+      </CardGrid>
     </Page>
   );
 }
