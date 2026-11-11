@@ -123,7 +123,7 @@ Open http://localhost:8000 and click **Reset demo**.
 
 **For the local AI** (free), install [Ollama](https://ollama.com) and run `ollama pull qwen2.5:3b`. In **Settings > Connections**, click **Find models**, pick the model and save. On a laptop without a strong graphics card, an answer can take a minute or more.
 
-**For photos of handwritten notes** (free, optional), also run `ollama pull qwen3-vl:4b-instruct`. PaidLoop finds it by itself. A photo or a scanned PDF is turned the right way up, made smaller (1280 pixels on the long side), and read by this model. The photo then shows next to the fields, so the owner can compare each value. Only one model is kept in memory at a time, so it runs on a 16 GB laptop. On a laptop processor a photo takes about 2 to 3 minutes to become an invoice draft. In our tests it read every line, price, hour and date of four handwriting-style notes, also a photo stored sideways; the basic reader before it lost lines, changed prices or found nothing. Without this model, photos go to that basic reader (Tesseract), which is made for printed text.
+**For photos of handwritten notes** (free, optional), also run `ollama pull qwen3-vl:4b-instruct`. PaidLoop finds it by itself. A photo or a scanned PDF is turned the right way up, made smaller (1280 pixels on the long side), and read by this model. The photo then shows next to the fields, so the owner can compare each value. WhatsApp and some other apps remove the note that says which way is up, so a sideways photo can be turned with **Turn left** or **Turn right** and read again. Only one model is kept in memory at a time, so it runs on a 16 GB laptop. On a laptop processor a photo takes about 2 to 3 minutes to become an invoice draft. In our tests it read every line, price, hour and date of four handwriting-style notes, also a photo stored sideways; the basic reader before it lost lines, changed prices or found nothing. Without this model, photos go to that basic reader (Tesseract), which is made for printed text.
 
 **Webhooks are optional.** The app asks PayPal for updates every 20 seconds, so it works without a public address. To use webhooks, register `/api/paypal/webhook` at a public URL and put the webhook ID in **Settings > Connections**.
 
@@ -131,13 +131,13 @@ Open http://localhost:8000 and click **Reset demo**.
 
 ```bash
 cd backend
-npm test          # 347 tests
+npm test          # 348 tests
 npm run check     # type check
 
 cd frontend
 npm run build     # UI rules (contrast, spacing, colours, motion), accessibility lint, types, size limits
 npm run walk      # every screen in Chrome at 5 widths, dark, German, compact, reduced motion: 169 checks with axe
-npm run flows     # the main jobs end to end, 28 checks (changes data: use fresh demo data)
+npm run flows     # the main jobs end to end, 30 checks (changes data: use fresh demo data)
 ```
 
 `walk` and `flows` need the app running (`UI_URL`, default http://127.0.0.1:8000) and Chrome.

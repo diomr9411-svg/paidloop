@@ -82,11 +82,15 @@ function toPixels(picture: PdfPicture): Pixels | null {
 /** A JPEG or PNG photo as pixels. pdf.js decodes it once it sits in a one-page PDF. */
 export async function photoPixels(photo: Uint8Array, format: "JPEG" | "PNG"): Promise<Pixels | null> {
   const document = await PDFDocument.create();
-  const image = format === "JPEG" ? await document.embedJpg(photo) : await document.embedPng(photo);
+  // A clean copy: pdf-lib reads from the start of the memory block, and an upload can sit further inside one
+  const own = new Uint8Array(photo);
+  const image = format === "JPEG" ? await document.embedJpg(own) : await document.embedPng(own);
   if (image.width * image.height > DECODE_MAX_PIXELS) return null;
   document.addPage([image.width, image.height]).drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
   const pixels = await biggestPicture(await document.save(), 1);
-  return pixels && format === "JPEG" ? upright(pixels, jpegOrientation(photo)) : pixels;
+  if (!pixels) return null;
+  // Messengers like WhatsApp remove this EXIF note; then the owner turns the photo on the screen
+  return format === "JPEG" ? upright(pixels, jpegOrientation(photo)) : pixels;
 }
 
 /** The EXIF orientation of a JPEG (1 = as stored). Phones often store a photo sideways and set this. */

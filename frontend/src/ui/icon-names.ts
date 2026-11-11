@@ -53,6 +53,8 @@ export const ICON_NAMES = [
   "pencil",
   "scan-text",
   "image",
+  "rotate-cw",
+  "rotate-ccw",
   "play",
   // Things
   "sparkles",

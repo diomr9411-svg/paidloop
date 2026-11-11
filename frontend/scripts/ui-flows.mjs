@@ -189,6 +189,11 @@ check("the photo is shown, with a badge saying it was read from a photo", await 
 check("photo beside the fields on a desktop", await js(`document.querySelector(".photo-preview").getBoundingClientRect().left > document.getElementById("details-title").closest(".card").getBoundingClientRect().right`));
 await send("Emulation.setDeviceMetricsOverride", { width: 375, height: 800, deviceScaleFactor: 1, mobile: true });
 check("photo under the fields on a phone, nothing sideways", await until(`document.querySelector(".photo-preview").getBoundingClientRect().top > document.getElementById("details-title").closest(".card").getBoundingClientRect().bottom && document.documentElement.scrollWidth <= innerWidth`, 3000));
+// A sideways photo (WhatsApp drops the EXIF turn): Turn photo turns it at once, then it can be read again
+await clickText("button", /Turn right/);
+check("Turn right turns the photo and offers Read again", await until(`(() => { const img = document.querySelector(".photo-preview"); return img.naturalWidth > 0 && img.naturalWidth < img.naturalHeight && [...document.querySelectorAll("button")].some((b) => /Read again/.test(b.textContent)) && document.documentElement.scrollWidth <= innerWidth; })()`));
+await clickText("button", /Turn left/);
+check("Turn left turns it back", await until(`(() => { const img = document.querySelector(".photo-preview"); return img.naturalWidth > img.naturalHeight; })()`));
 
 check("no console errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 const failed = results.filter((r) => !r.ok).length;

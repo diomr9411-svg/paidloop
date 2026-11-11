@@ -36,6 +36,13 @@ describe("getting a picture ready for reading", () => {
     expect([turned.width, turned.height]).toEqual([720, 960]);
   });
 
+  it("a photo that sits further inside a memory block (as uploads can) is still decoded", async () => {
+    const block = new Uint8Array(photo.length + 100);
+    block.set(photo, 100);
+    const pixels = await photoPixels(block.subarray(100), "JPEG");
+    expect([pixels?.width, pixels?.height]).toEqual([960, 720]);
+  });
+
   it("turning moves every pixel to the right place", () => {
     expect(Array.from(upright(small, 3).data)).toEqual([6, 5, 4, 3, 2, 1]);
     expect(Array.from(upright(small, 6).data)).toEqual([4, 1, 5, 2, 6, 3]);

@@ -75,7 +75,7 @@ export function NewInvoice({ hash, refresh }: PageProps) {
   const [dragging, setDragging] = useState(false);
   const [restored, setRestored] = useState<boolean>(!!saved && saved.step !== "note");
   // The uploaded photo, shown beside the fields. It lives only in this browser tab.
-  const [photo, setPhoto] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<{ file: File; url: string; turned: boolean } | null>(null);
 
   const fileInput = useRef<HTMLInputElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -86,7 +86,7 @@ export function NewInvoice({ hash, refresh }: PageProps) {
   const defaultVat = small ? "0" : "19";
 
   useEffect(() => () => {
-    if (photo) URL.revokeObjectURL(photo);
+    if (photo) URL.revokeObjectURL(photo.url);
   }, [photo]);
 
   useEffect(() => {
@@ -249,12 +249,23 @@ export function NewInvoice({ hash, refresh }: PageProps) {
       const result = await api("/api/capture/file", { method: "POST", body: form });
       setNote(result.source_text);
       fill(result);
-      setPhoto(file.type.startsWith("image/") ? URL.createObjectURL(file) : null);
+      setPhoto(file.type.startsWith("image/") ? { file, url: URL.createObjectURL(file), turned: false } : null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setReading(false);
       if (fileInput.current) fileInput.current.value = "";
+    }
+  }
+
+  // Messengers like WhatsApp drop the note that says which way is up, so the owner can turn the photo
+  async function turnPhoto(quarter: 1 | -1) {
+    if (!photo) return;
+    try {
+      const file = await turned(photo.file, quarter);
+      setPhoto({ file, url: URL.createObjectURL(file), turned: true });
+    } catch {
+      setError(t("turnFailed"));
     }
   }
 
@@ -465,8 +476,27 @@ export function NewInvoice({ hash, refresh }: PageProps) {
       <Split
         main={content}
         side={
-          <SectionCard title={t("photoTitle")} subtitle={t("photoSub")} icon="image">
-            <img className="photo-preview" src={photo} alt={t("photoAlt")} />
+          <SectionCard
+            title={t("photoTitle")}
+            subtitle={t("photoSub")}
+            icon="image"
+            actions={
+              <div className="button-row">
+                <Button size="sm" icon="rotate-ccw" disabled={reading} onClick={() => turnPhoto(-1)}>
+                  {t("turnLeft")}
+                </Button>
+                <Button size="sm" icon="rotate-cw" disabled={reading} onClick={() => turnPhoto(1)}>
+                  {t("turnRight")}
+                </Button>
+                {photo.turned && (
+                  <Button size="sm" icon="scan-text" busy={reading} pending={t("reading")} onClick={() => upload(photo.file)}>
+                    {t("readAgain")}
+                  </Button>
+                )}
+              </div>
+            }
+          >
+            <img className="photo-preview" src={photo.url} alt={t("photoAlt")} />
           </SectionCard>
         }
       />
@@ -983,4 +1013,22 @@ function targetOf(field: string): string | null {
   if (/^lines\.\d+\.net$/.test(field)) return field.replace(".net", ".price");
   if (field === "vat" || field === "gross" || field === "notes" || field === "format" || field.startsWith("seller")) return null;
   return field;
+}
+
+/** The photo turned a quarter to the right (1) or left (-1), as a new JPEG. The browser has already applied any EXIF turn. */
+async function turned(photo: Blob, quarter: 1 | -1): Promise<File> {
+  const picture = await createImageBitmap(photo);
+  const canvas = document.createElement("canvas");
+  canvas.width = picture.height;
+  canvas.height = picture.width;
+  const pen = canvas.getContext("2d");
+  if (!pen) throw new Error("no canvas");
+  if (quarter === 1) pen.translate(canvas.width, 0);
+  else pen.translate(0, canvas.height);
+  pen.rotate((quarter * Math.PI) / 2);
+  pen.drawImage(picture, 0, 0);
+  picture.close();
+  const result = await new Promise<Blob | null>((done) => canvas.toBlob(done, "image/jpeg", 0.92));
+  if (!result) throw new Error("no picture");
+  return new File([result], "note-turned.jpg", { type: "image/jpeg" });
 }
