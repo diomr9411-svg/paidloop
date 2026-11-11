@@ -1,6 +1,7 @@
 // One place that turns every problem into a clear answer in the person's language.
 import { ArgumentsHost, Catch, ExceptionFilter } from "@nestjs/common";
 import type { Request, Response } from "express";
+import { TOO_BIG } from "../capture";
 import { languageFromHeader, LocalizedError, t, Text } from "../i18n";
 import { PayPalError } from "../paypal";
 import { InvalidTransition } from "../states";
@@ -49,7 +50,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
     }
     if (status === 413) {
       // The upload limit was hit before our own check, so it gets the same clear message
-      return send(422, { detail: t("The file is larger than 5 MB.", "Die Datei ist größer als 5 MB.").get(language) });
+      return send(422, { detail: TOO_BIG.get(language) });
     }
     if (typeof status === "number" && status >= 400 && status < 500) {
       const notFound = status === 404;

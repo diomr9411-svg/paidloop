@@ -110,6 +110,7 @@ export function buildAi(settings: Settings, dataDir: string | null = resolve(REP
   return new LocalAI({
     baseUrl: settings.ollamaBaseUrl, model: settings.ollamaModel, timeoutSeconds: settings.aiTimeoutSeconds,
     answersFile: dataDir ? join(dataDir, "ai_answers.json") : undefined, cpuOnly: settings.aiCpuOnly, fetch: http,
+    visionModel: settings.ollamaVisionModel,
   });
 }
 

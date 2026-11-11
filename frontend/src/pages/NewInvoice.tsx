@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 
 import { addDays, api, customerLink, lineNetCents, numberText, post, put, toNumber, totals } from "../api";
 import { useT } from "../i18n";
@@ -74,6 +74,8 @@ export function NewInvoice({ hash, refresh }: PageProps) {
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
   const [restored, setRestored] = useState<boolean>(!!saved && saved.step !== "note");
+  // The uploaded photo, shown beside the fields. It lives only in this browser tab.
+  const [photo, setPhoto] = useState<string | null>(null);
 
   const fileInput = useRef<HTMLInputElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -82,6 +84,10 @@ export function NewInvoice({ hash, refresh }: PageProps) {
 
   const small = !!business?.small_business;
   const defaultVat = small ? "0" : "19";
+
+  useEffect(() => () => {
+    if (photo) URL.revokeObjectURL(photo);
+  }, [photo]);
 
   useEffect(() => {
     api<any[]>("/api/customers").then(setCustomers).catch(() => undefined);
@@ -225,6 +231,7 @@ export function NewInvoice({ hash, refresh }: PageProps) {
     setError("");
     try {
       fill(await post("/api/capture/text", { text: note }));
+      setPhoto(null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -242,6 +249,7 @@ export function NewInvoice({ hash, refresh }: PageProps) {
       const result = await api("/api/capture/file", { method: "POST", body: form });
       setNote(result.source_text);
       fill(result);
+      setPhoto(file.type.startsWith("image/") ? URL.createObjectURL(file) : null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -253,6 +261,7 @@ export function NewInvoice({ hash, refresh }: PageProps) {
   function byHand() {
     started();
     setError("");
+    setPhoto(null);
     setCapture(null);
     setUnsure([]);
     setCustomer({ ...EMPTY_CUSTOMER, language: lang });
@@ -282,6 +291,7 @@ export function NewInvoice({ hash, refresh }: PageProps) {
     setElapsed(null);
     setError("");
     setRestored(false);
+    setPhoto(null);
     if (window.location.hash !== "#/new") window.location.hash = "#/new";
   }
 
@@ -443,7 +453,26 @@ export function NewInvoice({ hash, refresh }: PageProps) {
   const firstFixable = check?.issues.find((item: any) => item.severity === "error" && targetOf(item.field));
   const stepIndex = STEPS.indexOf(step);
   const toFix = check?.issues.filter((item: any) => item.severity === "error").length || 0;
-  const source = capture?.source === "ai" ? { icon: "sparkles" as const, text: t("readByAi") } : capture ? { icon: "list-checks" as const, text: t("readByRules") } : { icon: "pencil" as const, text: t("enteredByHand") };
+  const source =
+    capture?.read_from === "photo_ai" ? { icon: "image" as const, text: t("readFromPhotoAi") }
+    : capture?.read_from === "photo_basic" ? { icon: "image" as const, text: t("readFromPhotoBasic") }
+    : capture?.source === "ai" ? { icon: "sparkles" as const, text: t("readByAi") }
+    : capture ? { icon: "list-checks" as const, text: t("readByRules") }
+    : { icon: "pencil" as const, text: t("enteredByHand") };
+  // With a photo, the fields and the photo sit side by side, so each value can be compared.
+  const besidePhoto = (content: ReactNode) =>
+    photo ? (
+      <Split
+        main={content}
+        side={
+          <SectionCard title={t("photoTitle")} subtitle={t("photoSub")} icon="image">
+            <img className="photo-preview" src={photo} alt={t("photoAlt")} />
+          </SectionCard>
+        }
+      />
+    ) : (
+      content
+    );
 
   return (
     <Page template="wizard">
@@ -542,6 +571,7 @@ export function NewInvoice({ hash, refresh }: PageProps) {
 
       {step === "details" && (
         <>
+          {besidePhoto(
           <section className="card" aria-labelledby="details-title">
             <div className="card-head">
               <h2 id="details-title" ref={heading} tabIndex={-1}>
@@ -766,7 +796,8 @@ export function NewInvoice({ hash, refresh }: PageProps) {
               </FieldGrid>
               <Switch id="property-work" label={t("propertyWork")} checked={propertyWork} onChange={(event) => setPropertyWork(event.target.checked)} />
             </div>
-          </section>
+          </section>,
+          )}
 
           <div className="action-bar">
             <Button tone="ghost" icon="arrow-left" onClick={() => setStep("note")}>

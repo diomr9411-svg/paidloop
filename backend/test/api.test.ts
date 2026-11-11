@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import * as capture from "../src/capture";
 import { addDays, realToday } from "../src/dates";
 import { loadSettings } from "../src/settings";
 import { makeApi, createIssued, Api } from "./api";
@@ -203,12 +204,12 @@ describe("API", () => {
     expect(good.body.source_text).toContain("Reparatur");
   });
 
-  it("an upload over 5 MB gets a clear message", async () => {
+  it("an upload over the size limit gets a clear message", async () => {
     const api = await fresh();
     const big = await api.http.post("/api/capture/file").set("X-Language", "de")
-      .attach("file", Buffer.alloc(5 * 1024 * 1024 + 100, "x"), { filename: "big.pdf", contentType: "application/pdf" });
+      .attach("file", Buffer.alloc(capture.MAX_FILE_BYTES + 100, "x"), { filename: "big.pdf", contentType: "application/pdf" });
     expect(big.status).toBe(422);
-    expect(big.body.detail).toContain("5 MB");
+    expect(big.body.detail).toContain(`${capture.MAX_FILE_MB} MB`);
   });
 
   it("an unknown invoice is 404", async () => {

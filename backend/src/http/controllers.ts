@@ -157,7 +157,8 @@ export class CoreController {
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: capture.MAX_FILE_BYTES + 1 } }))
   async captureFromFile(@UploadedFile() file: { buffer: Buffer } | undefined) {
     if (!file) throw new ValidationFailed(["file"]);
-    return captureJson(this.s.db, await capture.captureText(await capture.textFromFile(file.buffer), this.s.ai));
+    const read = await capture.readFile(file.buffer, this.s.ai);
+    return captureJson(this.s.db, await capture.captureText(read.text, this.s.ai, read.read_from));
   }
 
   // ---------------------------------------------------------------- follow-up agent and approvals

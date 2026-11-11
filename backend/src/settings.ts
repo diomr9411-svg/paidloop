@@ -34,6 +34,8 @@ export interface Settings {
   sandboxBuyerEmail: string;
   ollamaBaseUrl: string;
   ollamaModel: string;
+  /** Model for photos of notes. Empty: found by itself among the installed models. */
+  ollamaVisionModel: string;
   aiTimeoutSeconds: number;
   aiCpuOnly: boolean;
   databaseUrl: string;
@@ -76,6 +78,7 @@ export function loadSettings(env: Record<string, string | undefined> = process.e
     sandboxBuyerEmail: read("SANDBOX_BUYER_EMAIL"),
     ollamaBaseUrl: read("OLLAMA_BASE_URL", "http://localhost:11434"),
     ollamaModel: read("OLLAMA_MODEL"),
+    ollamaVisionModel: read("OLLAMA_VISION_MODEL"),
     aiTimeoutSeconds: Number(read("AI_TIMEOUT_SECONDS", "180")),
     aiCpuOnly: truthy(read("AI_CPU_ONLY")),
     databaseUrl: read("DATABASE_URL", "sqlite:///data/paidloop.db"),

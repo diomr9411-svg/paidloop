@@ -1,6 +1,7 @@
 // Uses the real screens like an owner would, in headless Chrome, and checks the main flows end to end:
 // a note becomes an issued invoice, a bank payment is recorded, an invoice is cancelled through the confirm
-// dialog, a settings card saves itself, the customer chat answers, and the phone menu works by keyboard only.
+// dialog, a settings card saves itself, the customer chat answers, the phone menu works by keyboard only, and a
+// photo of a note is shown beside the fields read from it.
 // It CHANGES the data (issues and cancels invoices), so run it on fresh demo data: CI does, after the walk.
 // Run: npm run flows   (UI_URL=http://127.0.0.1:8000 by default; CHROME_PATH if Chrome is elsewhere)
 import { spawn } from "node:child_process";
@@ -164,6 +165,30 @@ check("focus moves into the drawer", await js(`document.querySelector("dialog.dr
 await key("Escape", 27);
 check("Escape closes the drawer", await until(`!document.querySelector("dialog.drawer[open]")`));
 check("focus returns to the menu button", await until(`document.activeElement?.classList.contains("menu-button")`, 3000));
+
+// 7. A photo of a note: the fields and the photo side by side on a desktop, one under the other on a phone.
+// The picture is drawn in the page, so no file is needed. With a local vision model the reading takes a while.
+await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+await go("#/new");
+await js(`(async () => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1000; canvas.height = 600;
+  const pen = canvas.getContext("2d");
+  pen.fillStyle = "#ffffff"; pen.fillRect(0, 0, 1000, 600);
+  pen.fillStyle = "#1d2a5c"; pen.font = "48px sans-serif";
+  ["at Mueller GmbH", "2 hours at 60 euro", "valve 18,90 euro"].forEach((line, row) => pen.fillText(line, 60, 120 + row * 90));
+  const picture = await new Promise((done) => canvas.toBlob(done, "image/png"));
+  const files = new DataTransfer();
+  files.items.add(new File([picture], "note.png", { type: "image/png" }));
+  const input = document.querySelector("input[type=file]");
+  input.files = files.files;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+})()`);
+check("a photo opens the details step", await until(`!!document.getElementById("details-title")`, 300000));
+check("the photo is shown, with a badge saying it was read from a photo", await until(`document.querySelector(".photo-preview")?.naturalWidth > 0 && /Photo read/.test(document.querySelector(".card-head .badge")?.textContent || "")`));
+check("photo beside the fields on a desktop", await js(`document.querySelector(".photo-preview").getBoundingClientRect().left > document.getElementById("details-title").closest(".card").getBoundingClientRect().right`));
+await send("Emulation.setDeviceMetricsOverride", { width: 375, height: 800, deviceScaleFactor: 1, mobile: true });
+check("photo under the fields on a phone, nothing sideways", await until(`document.querySelector(".photo-preview").getBoundingClientRect().top > document.getElementById("details-title").closest(".card").getBoundingClientRect().bottom && document.documentElement.scrollWidth <= innerWidth`, 3000));
 
 check("no console errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 const failed = results.filter((r) => !r.ok).length;

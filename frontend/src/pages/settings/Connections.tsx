@@ -196,7 +196,13 @@ function PaypalCard({ view, onSaved }: { view: View; onSaved: (view: View) => vo
           <Field id="paypal-webhook_id" label={t("webhookId")} help={t("webhookIdHint")} error={problem("webhook_id")}>
             <input value={form.webhook_id} onChange={(event) => change("webhook_id", event.target.value)} autoComplete="off" spellCheck={false} />
           </Field>
-          <Field id="paypal-buyer_email" label={t("buyerEmail")} help={t("buyerEmailHint")} error={problem("buyer_email")}>
+          <Field
+            id="paypal-buyer_email"
+            label={t("buyerEmail")}
+            help={t("buyerEmailHint")}
+            note={/@/.test(form.buyer_email) && !/\.example\.com\s*$/i.test(form.buyer_email) ? t("buyerEmailNotSandbox") : undefined}
+            error={problem("buyer_email")}
+          >
             <input type="email" value={form.buyer_email} onChange={(event) => change("buyer_email", event.target.value)} autoComplete="off" />
           </Field>
         </FieldGrid>

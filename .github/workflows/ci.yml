@@ -87,7 +87,7 @@ jobs:
         env:
           CI: "true"
           CHROME_PATH: /usr/bin/google-chrome
-      - name: Use the main flows like an owner (note to issued invoice, payment, cancel, settings, customer chat, phone menu)
+      - name: Use the main flows like an owner (note to issued invoice, payment, cancel, settings, customer chat, phone menu, photo of a note)
         run: npm run flows
         working-directory: frontend
         env:

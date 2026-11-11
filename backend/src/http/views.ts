@@ -159,6 +159,7 @@ export function captureJson(db: Db, result: capture.CaptureResult) {
   const business = businessOf(db);
   return {
     source: result.source,
+    read_from: result.read_from,
     source_text: result.source_text,
     extracted,
     unsure: result.unsure,

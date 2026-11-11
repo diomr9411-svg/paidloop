@@ -135,6 +135,8 @@ main:focus { outline: none; }
 /* Wide screens: a main column and a side column, so the whole window is used and nothing just stretches */
 .split { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-section); align-items: start; }
 .split-main, .split-side { display: flex; flex-direction: column; gap: var(--space-section); min-width: 0; }
+/* The photo of a note beside the fields read from it */
+.photo-preview { display: block; width: 100%; height: auto; border: var(--hairline) solid var(--line); border-radius: var(--radius); }
 /* Cards side by side; in one row they share a height, and each card's own Save sits at its foot */
 .card-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-section); align-items: stretch; }
 .card-grid > form, .card-grid > .loading { display: flex; flex-direction: column; min-width: 0; }

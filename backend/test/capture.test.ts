@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { crc32, deflateSync } from "node:zlib";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import { afterAll, describe, expect, it } from "vitest";
-import { NoAI } from "../src/ai";
+import { LocalAI, NoAI } from "../src/ai";
 import * as capture from "../src/capture";
 import { emptyExtracted, extractedLine } from "../src/capture";
 import { safeAiSentence } from "../src/messages";
@@ -148,6 +150,198 @@ describe("files", () => {
     const db = testDb();
     const invoice = await makeIssued(db, newPaypal());
     expect(await capture.textFromFile(getInvoice(db, invoice.id, ["pdf"])!.pdf!)).toContain("Badreparatur");
+  });
+});
+
+/** A vision model that says what a test needs, and remembers the pictures it was shown. */
+class SeeingAI extends ScriptedAI {
+  pictures: Uint8Array[] = [];
+  constructor(public seen: string | null) {
+    super();
+  }
+  async visionModel(): Promise<string> {
+    return "seeing-test-model";
+  }
+  async readImage(image: Uint8Array): Promise<string | null> {
+    this.pictures.push(image);
+    return this.seen;
+  }
+}
+
+/** A plain grey PNG, big enough to count as a scanned page. */
+function greyPng(width: number, height: number): Buffer {
+  const chunk = (type: string, body: Buffer) => {
+    const head = Buffer.alloc(8);
+    head.writeUInt32BE(body.length, 0);
+    head.write(type, 4, "latin1");
+    const tail = Buffer.alloc(4);
+    tail.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), body])) >>> 0, 0);
+    return Buffer.concat([head, body, tail]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 0, 0, 0, 0], 8);
+  const rows = Buffer.alloc((width + 1) * height, 200);
+  for (let row = 0; row < height; row++) rows[row * (width + 1)] = 0;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", header), chunk("IDAT", deflateSync(rows)), chunk("IEND", Buffer.alloc(0))]);
+}
+
+async function pdfWithPicture(picture: { png?: Buffer; jpeg?: Uint8Array }, text = ""): Promise<Uint8Array> {
+  const document = await PDFDocument.create();
+  const page = document.addPage([595, 842]);
+  const image = picture.png ? await document.embedPng(picture.png) : await document.embedJpg(picture.jpeg!);
+  page.drawImage(image, { x: 0, y: 0, width: 595, height: 842 });
+  if (text) page.drawText(text, { x: 40, y: 800, size: 12, font: await document.embedFont(StandardFonts.Helvetica) });
+  return document.save();
+}
+
+describe("photos and scans of handwritten notes", () => {
+  const photo = readFileSync(join(__dirname, "fixtures", "note-english.png"));
+
+  it("a photo goes to the vision model, and the owner is told to compare", async () => {
+    const ai = new SeeingAI("```\nMüller GmbH\nHeizung 2,5 h x 60 eur\nVentil 1 Stk 18,90 €\n```");
+    const read = await capture.readFile(photo, ai);
+    expect(read).toEqual({ text: "Müller GmbH\nHeizung 2,5 h x 60 eur\nVentil 1 Stk 18,90 €", read_from: "photo_ai" });
+    expect(ai.pictures).toHaveLength(1);
+    const result = await capture.captureText(read.text, ai, read.read_from);
+    expect(result.read_from).toBe("photo_ai");
+    expect(result.extracted.lines.map((line) => [line.quantity, line.unit_price_eur])).toEqual([[2.5, 60], [1, 18.9]]);
+    expect(result.warnings.map((warning) => warning.en).join(" ")).toContain("compare every name and number");
+    // Every name and number read from a photo is marked "Please check"
+    for (const field of ["customer_name", "lines.0.quantity", "lines.0.unit_price", "lines.1.quantity", "lines.1.unit_price"]) expect(result.unsure).toContain(field);
+  });
+
+  it("without a vision model, the basic reader takes over and says so", async () => {
+    const read = await capture.readFile(photo, new SeeingAI(null));
+    expect(read.read_from).toBe("photo_basic");
+    expect(read.text).toContain("Mueller");
+    const result = await capture.captureText(read.text, noAi, read.read_from);
+    expect(result.warnings.map((warning) => warning.en).join(" ")).toContain("vision model");
+  }, 60000);
+
+  it("a typed note gets no photo warning", async () => {
+    const result = await capture.captureText("2 hours at Mueller GmbH at 60 euro", noAi);
+    expect([result.read_from, result.warnings]).toEqual(["note", []]);
+    expect(result.unsure).not.toContain("lines.0.unit_price");
+  });
+
+  it("a scanned PDF page is read like a photo", async () => {
+    const ai = new SeeingAI("Becker\nfix tap 1.5 hrs @ 50");
+    const read = await capture.readFile(await pdfWithPicture({ png: greyPng(800, 600) }), ai);
+    expect(read).toEqual({ text: "Becker\nfix tap 1.5 hrs @ 50", read_from: "photo_ai" });
+    // The page picture is handed over as a real PNG
+    expect(capture.imageSize(ai.pictures[0])).toEqual({ format: "PNG", width: 800, height: 600 });
+    await expect(PDFDocument.create().then((document) => document.embedPng(ai.pictures[0]))).resolves.toBeTruthy();
+  });
+
+  it("a JPEG scan is decoded and handed over as a picture", async () => {
+    const ai = new SeeingAI("Anfahrt 25 €");
+    await capture.readFile(await pdfWithPicture({ jpeg: readFileSync(join(__dirname, "fixtures", "note-photo.jpg")) }), ai);
+    expect(capture.imageSize(ai.pictures[0])).toEqual({ format: "PNG", width: 960, height: 720 });
+  });
+
+  it("a big photo is made smaller for the AI, so it takes about a minute, not several", async () => {
+    const ai = new SeeingAI("Becker, fix tap 1.5 hrs @ 50");
+    await capture.readFile(greyPng(2560, 1920), ai);
+    expect(capture.imageSize(ai.pictures[0])).toEqual({ format: "PNG", width: 1280, height: 960 });
+  });
+
+  it("a scan with a scanner's text layer uses the picture when a vision model is there, else the text", async () => {
+    const pdf = await pdfWithPicture({ png: greyPng(800, 600) }, "M?ller GmbH 2,S h");
+    expect((await capture.readFile(pdf, new SeeingAI("Müller GmbH 2,5 h"))).text).toBe("Müller GmbH 2,5 h");
+    expect(await capture.readFile(pdf, noAi)).toEqual({ text: "M?ller GmbH 2,S h", read_from: "pdf" });
+  });
+
+  it("our own invoice PDF is still read as text, even with a vision model", async () => {
+    const db = testDb();
+    const invoice = await makeIssued(db, newPaypal());
+    const ai = new SeeingAI("should not be used");
+    const read = await capture.readFile(getInvoice(db, invoice.id, ["pdf"])!.pdf!, ai);
+    expect(read.read_from).toBe("pdf");
+    expect(ai.pictures).toHaveLength(0);
+  });
+});
+
+describe("the local vision model", () => {
+  /** A pretend Ollama with a text model and a vision model installed. */
+  function ollama(answer = "Müller GmbH\n2,5 h x 60 eur") {
+    const calls: { path: string; body: any }[] = [];
+    const http = (async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      calls.push({ path, body });
+      const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } });
+      if (path === "/api/tags") return json({ models: [{ name: "qwen2.5:3b" }, { name: "qwen3-vl:4b" }] });
+      if (path === "/api/show") return json({ capabilities: body.model === "qwen3-vl:4b" ? ["completion", "vision"] : ["completion"] });
+      if (path === "/api/chat") return json({ message: { content: answer } });
+      return new Response("", { status: 404 });
+    }) as typeof fetch;
+    return { calls, http };
+  }
+
+  it("is found among the installed models, and gets the photo", async () => {
+    const { calls, http } = ollama();
+    const ai = new LocalAI({ baseUrl: "http://ollama.test", model: "qwen2.5:3b", fetch: http });
+    expect(await ai.visionModel()).toBe("qwen3-vl:4b");
+    expect(await ai.readImage(Buffer.from("picture"), "read it")).toBe("Müller GmbH\n2,5 h x 60 eur");
+    const chat = calls.find((call) => call.path === "/api/chat")!.body;
+    expect([chat.model, chat.think, chat.messages[0].images]).toEqual(["qwen3-vl:4b", false, [Buffer.from("picture").toString("base64")]]);
+  });
+
+  it("only one model sits in memory: the text model is freed first, the photo model right after", async () => {
+    const { calls, http } = ollama();
+    await new LocalAI({ baseUrl: "http://ollama.test", model: "qwen2.5:3b", fetch: http }).readImage(Buffer.from("picture"), "read it");
+    const order = calls.filter((call) => call.path === "/api/generate" || call.path === "/api/chat");
+    expect(order.map((call) => [call.path, call.body.model, call.body.keep_alive])).toEqual([
+      ["/api/generate", "qwen2.5:3b", 0],
+      ["/api/chat", "qwen3-vl:4b", 0],
+    ]);
+  });
+
+  it("a chosen model must be installed and able to see", async () => {
+    const { http } = ollama();
+    expect(await new LocalAI({ baseUrl: "http://ollama.test", model: "qwen2.5:3b", visionModel: "qwen2.5:3b", fetch: http }).visionModel()).toBe("");
+    const none = new LocalAI({ baseUrl: "http://ollama.test", model: "qwen2.5:3b", visionModel: "llava:7b", fetch: http });
+    expect(await none.readImage(Buffer.from("picture"), "read it")).toBeNull();
+  });
+
+  it("the same photo is read only once", async () => {
+    const { calls, http } = ollama();
+    const ai = new LocalAI({ baseUrl: "http://ollama.test", model: "qwen2.5:3b", fetch: http });
+    await ai.readImage(Buffer.from("picture"), "read it");
+    await ai.readImage(Buffer.from("picture"), "read it");
+    expect(calls.filter((call) => call.path === "/api/chat")).toHaveLength(1);
+  });
+
+  it("no answer means no text, so the basic reader takes over", async () => {
+    const { http } = ollama("   ");
+    expect(await new LocalAI({ baseUrl: "http://ollama.test", model: "qwen2.5:3b", fetch: http }).readImage(Buffer.from("picture"), "read it")).toBeNull();
+  });
+
+  it("a streamed answer is joined, and the model's thinking is left out", async () => {
+    const lines = [{ message: { thinking: "Let me look at the note" } }, { message: { content: "Müller " } }, { message: { content: "GmbH\n2,5 h" } }, { done: true }];
+    const stream = lines.map((line) => JSON.stringify(line)).join("\n") + "\n";
+    const http = (async (url: string) => {
+      const path = new URL(url).pathname;
+      const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
+      if (path === "/api/tags") return json({ models: [{ name: "qwen3-vl:4b" }] });
+      if (path === "/api/show") return json({ capabilities: ["vision"] });
+      // Sent in two uneven pieces, as a network does
+      const bytes = new TextEncoder().encode(stream);
+      return new Response(new ReadableStream({ start(controller) { controller.enqueue(bytes.slice(0, 30)); controller.enqueue(bytes.slice(30)); controller.close(); } }), { status: 200 });
+    }) as typeof fetch;
+    expect(await new LocalAI({ baseUrl: "http://ollama.test", model: "qwen3-vl:4b", fetch: http }).readImage(Buffer.from("picture"), "read it")).toBe("Müller GmbH\n2,5 h");
+  });
+
+  it("a model that answers at once is chosen before one that thinks first", async () => {
+    const http = (async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
+      if (path === "/api/tags") return json({ models: [{ name: "qwen2.5:3b" }, { name: "qwen3-vl:4b" }, { name: "qwen3-vl:4b-instruct" }] });
+      return json({ capabilities: JSON.parse(String(init?.body)).model.startsWith("qwen3-vl") ? ["vision"] : ["completion"] });
+    }) as typeof fetch;
+    expect(await new LocalAI({ baseUrl: "http://ollama.test", model: "qwen2.5:3b", fetch: http }).visionModel()).toBe("qwen3-vl:4b-instruct");
   });
 });
 
